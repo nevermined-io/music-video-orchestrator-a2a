@@ -60,6 +60,8 @@ export async function validateSongGenerationTask(
     output_artifacts: artifacts[0] || [],
   });
 
+  logger.info("Song Generation Step completed");
+
   logMessage(payments, {
     task_id: parentStep.task_id,
     level: result.status === 201 ? "info" : "error",
@@ -89,17 +91,19 @@ export async function validateMusicScriptTask(
   parentStep: any,
   payments: any
 ) {
+  logger.info(`Validating music script generation task ${taskId}...`);
   const taskResult = await payments.query.getTaskWithSteps(
     agentDid,
     taskId,
     accessConfig
   );
   const taskData = taskResult.data;
+  logger.info(`Task data: ${JSON.stringify(taskData)}`);
 
   if (taskData.task.task_status !== AgentExecutionStatus.Completed) {
     return;
   }
-  const [{ transformedScenes, characters }] = JSON.parse(
+  const [{ transformedScenes, characters, settings }] = JSON.parse(
     taskData.task.output_artifacts || "[]"
   );
   const { tags, lyrics, duration, songUrl } = JSON.parse(
@@ -116,6 +120,7 @@ export async function validateMusicScriptTask(
         tags,
         lyrics,
         duration,
+        settings,
         songUrl,
         prompts: transformedScenes,
         characters,
@@ -135,23 +140,27 @@ export async function validateMusicScriptTask(
   });
 }
 /**
- * Validates the result of a single character image generation task, returning the artifacts produced (e.g., image url).
+ * Validates the result of a single image generation task, returning the artifacts produced (e.g., image url).
  *
  * @async
- * @function validateCharacterGenerationTask
+ * @function validateImageGenerationTask
  * @param {string} taskId - The ID of the sub-task.
  * @param {string} agentDid - The DID of the agent that generated the image.
  * @param {any} accessConfig - The agent's access configuration.
  * @param {any} parentStep - The parent step that initiated this task.
  * @param {any} payments - The Nevermined Payments instance.
- * @returns {Promise<string[]>} - Returns the artifacts array from the image generator (URL, etc.).
+ * @param {string} id - The ID of the subject.
+ * @param {string} subjectType - The type of subject (setting or character).
+ * @returns {Promise<{ id: string; subjectType: string; url: string }>} - Returns the ID, type, and URL of the generated image.
  */
-export async function validateCharacterGenerationTask(
+export async function validateImageGenerationTask(
   taskId: string,
   agentDid: string,
   accessConfig: any,
-  payments: any
-): Promise<string[]> {
+  payments: any,
+  id: string,
+  subjectType: "setting" | "character"
+): Promise<{ id: string; subjectType: string; url: string }> {
   logger.info(`Validating image generation task ${taskId}...`);
 
   const taskResult = await payments.query.getTaskWithSteps(
@@ -159,8 +168,18 @@ export async function validateCharacterGenerationTask(
     taskId,
     accessConfig
   );
+  logger.info(
+    `Task result for ${subjectType} ${id}: ${JSON.stringify(
+      taskResult.data.task
+    )}`
+  );
 
-  return JSON.parse(taskResult.data.task.output_artifacts)[0];
+  const url = JSON.parse(taskResult.data.task.output_artifacts)[0];
+  return {
+    id,
+    subjectType,
+    url,
+  };
 }
 
 /**

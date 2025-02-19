@@ -23,16 +23,144 @@ import { ensureSufficientBalance } from "../payments/ensureBalance";
 import {
   validateMusicScriptTask,
   validateSongGenerationTask,
-  validateCharacterGenerationTask,
+  validateImageGenerationTask,
   validateVideoGenerationTask,
 } from "./taskValidation";
 
+/* -------------------------------------
+   Helper Functions
+------------------------------------- */
+
 /**
- * Main event handler for steps. This function is subscribed to "step-updated" events.
- * It routes the step to the appropriate handler based on the step name.
+ * Updates the given step to a failure status with the provided error message.
  *
- * @param {any} payments - The Nevermined Payments instance.
- * @returns {(data: any) => Promise<void>} - Returns an async function that processes incoming steps.
+ * @param step - The current step object.
+ * @param payments - The Payments instance.
+ * @param errorMessage - The error message to output.
+ * @returns {Promise<void>}
+ */
+async function updateStepFailure(
+  step: any,
+  payments: any,
+  errorMessage: string
+): Promise<void> {
+  await payments.query.updateStep(step.did, {
+    ...step,
+    step_status: AgentExecutionStatus.Failed,
+    output: errorMessage,
+  });
+}
+
+/**
+ * Safely parses a JSON string. Returns the provided default value if parsing fails.
+ *
+ * @param jsonStr - The JSON string to parse.
+ * @param defaultValue - The default value to return on failure.
+ * @returns {any} - The parsed object or the default value.
+ */
+function safeParse(jsonStr: string, defaultValue: any = []): any {
+  try {
+    return JSON.parse(jsonStr);
+  } catch (err) {
+    logger.error("Failed to parse JSON:", err);
+    return defaultValue;
+  }
+}
+
+/**
+ * Generic retry helper.
+ * Tries the given operation. If it fails, retries up to maxRetries times before finally rejecting.
+ *
+ * @param operation - A function returning a promise.
+ * @param maxRetries - Maximum number of additional attempts (default is 2).
+ * @returns {Promise<T>} - The resolved value from the operation.
+ */
+async function retryOperation<T>(
+  operation: () => Promise<T>,
+  maxRetries: number = 2
+): Promise<T> {
+  let attempt = 0;
+  while (attempt <= maxRetries) {
+    try {
+      return await operation();
+    } catch (err) {
+      if (attempt === maxRetries) {
+        throw err;
+      }
+      attempt++;
+    }
+  }
+  throw new Error("Unreachable code in retryOperation");
+}
+
+/**
+ * Executes a task using payments.query.createTask and validates it via the provided validation function.
+ *
+ * @param payments - The Payments instance.
+ * @param agentDid - The DID of the external agent.
+ * @param taskData - The data payload for creating the task.
+ * @param accessConfig - The access configuration for the agent.
+ * @param validationFn - A function that validates the task output. It receives (taskId, agentDid, accessConfig, step, payments) and returns a promise with the validated artifacts.
+ * @param step - The current step object.
+ * @returns {Promise<any>} - A promise that resolves with the validated task artifacts.
+ */
+async function executeTaskWithValidation(
+  payments: any,
+  agentDid: string,
+  taskData: any,
+  accessConfig: any,
+  validationFn: (
+    taskId: string,
+    agentDid: string,
+    accessConfig: any,
+    step: any,
+    payments: any
+  ) => Promise<any>,
+  step: any
+): Promise<any> {
+  return new Promise(async (resolve, reject) => {
+    const result = await payments.query.createTask(
+      agentDid,
+      taskData,
+      accessConfig,
+      async (cbData: any) => {
+        try {
+          const taskLog = JSON.parse(cbData);
+          if (taskLog.task_status === AgentExecutionStatus.Completed) {
+            const artifacts = await validationFn(
+              taskLog.task_id,
+              agentDid,
+              accessConfig,
+              step,
+              payments
+            );
+            resolve(artifacts);
+          } else if (taskLog.task_status === AgentExecutionStatus.Failed) {
+            reject(
+              new Error(`Task failed with status: ${taskLog.task_status}`)
+            );
+          }
+        } catch (err) {
+          reject(err);
+        }
+      }
+    );
+    if (result.status !== 201) {
+      reject(new Error(`Error creating task: ${JSON.stringify(result.data)}`));
+    }
+  });
+}
+
+/* -------------------------------------
+   Main Event Handler
+------------------------------------- */
+
+/**
+ * Processes incoming steps. This function is subscribed to "step-updated" events and routes
+ * the step to the appropriate handler based on the step name.
+ *
+ * @param payments - The Payments instance.
+ * @returns {(data: any) => Promise<void>} - An asynchronous function that processes incoming step events.
  */
 export function processSteps(payments: any) {
   return async (data: any) => {
@@ -42,7 +170,6 @@ export function processSteps(payments: any) {
     );
 
     const step = await payments.query.getStep(eventData.step_id);
-
     logMessage(payments, {
       task_id: step.task_id,
       level: "info",
@@ -55,50 +182,43 @@ export function processSteps(payments: any) {
       return;
     }
 
-    // Route step to the corresponding handler
-    switch (step.name) {
-      case "init":
-        await handleInitStep(step, payments);
-        break;
-      case "callSongGenerator":
-        await handleCallSongGenerator(step, payments);
-        break;
-      case "generateMusicScript":
-        await handleGenerateMusicScript(step, payments);
-        break;
-      case "callCharacterGenerator":
-        await handleGenerateCharacters(step, payments);
-        break;
-      case "callVideoGenerator":
-        await handleCallVideoGenerator(step, payments);
-        break;
-      case "compileVideo":
-        await handleCompileVideo(step, payments);
-        break;
-      default:
-        logger.warn(`Unrecognized step name: ${step.name}`);
-        break;
+    // Use a mapping of step names to handler functions for cleaner routing.
+    const handlers: { [key: string]: Function } = {
+      init: handleInitStep,
+      callSongGenerator: handleCallSongGenerator,
+      generateMusicScript: handleGenerateMusicScript,
+      callImagesGenerator: handleCallImagesGenerator,
+      callVideoGenerator: handleCallVideoGenerator,
+      compileVideo: handleCompileVideo,
+    };
+
+    const handler = handlers[step.name];
+    if (handler) {
+      await handler(step, payments);
+    } else {
+      logger.warn(`Unrecognized step name: ${step.name}`);
     }
   };
 }
 
+/* -------------------------------------
+   Step Handlers
+------------------------------------- */
+
 /**
- * Handles the "init" step, which creates the entire pipeline of subsequent steps.
+ * Handles the "init" step by creating the entire workflow pipeline.
  *
- * @async
- * @function handleInitStep
- * @param {any} step - The current step data (init step).
- * @param {any} payments - The Nevermined Payments instance.
- * @returns {Promise<void>}
+ * @param step - The current step object for initialization.
+ * @param payments - The Payments instance.
+ * @returns {Promise<void>} - A promise that resolves when the workflow steps have been created and the init step is updated.
  */
 export async function handleInitStep(step: any, payments: any) {
   const songStepId = generateStepId();
   const scriptStepId = generateStepId();
-  const characterStepId = generateStepId();
+  const imagesStepId = generateStepId();
   const videoStepId = generateStepId();
   const compileStepId = generateStepId();
 
-  // Define the sequential steps
   const steps = [
     {
       step_id: songStepId,
@@ -115,16 +235,16 @@ export async function handleInitStep(step: any, payments: any) {
       is_last: false,
     },
     {
-      step_id: characterStepId,
+      step_id: imagesStepId,
       task_id: step.task_id,
       predecessor: scriptStepId,
-      name: "callCharacterGenerator",
+      name: "callImagesGenerator",
       is_last: false,
     },
     {
       step_id: videoStepId,
       task_id: step.task_id,
-      predecessor: characterStepId,
+      predecessor: imagesStepId,
       name: "callVideoGenerator",
       is_last: false,
     },
@@ -137,21 +257,9 @@ export async function handleInitStep(step: any, payments: any) {
     },
   ];
 
-  const createResult = await payments.query.createSteps(
-    step.did,
-    step.task_id,
-    { steps }
-  );
-  logMessage(payments, {
-    task_id: step.task_id,
-    level: createResult.status === 201 ? "info" : "error",
-    message:
-      createResult.status === 201
-        ? "Workflow steps created successfully."
-        : `Error creating steps: ${JSON.stringify(createResult.data)}`,
-  });
+  await payments.query.createSteps(step.did, step.task_id, { steps });
 
-  // Mark the init step as completed
+  // Mark the init step as completed.
   await payments.query.updateStep(step.did, {
     ...step,
     step_status: AgentExecutionStatus.Completed,
@@ -160,29 +268,13 @@ export async function handleInitStep(step: any, payments: any) {
 }
 
 /**
- * Invokes the Song Generator Agent.
+ * Invokes the Song Generator Agent to generate a song based on the provided prompt and optional lyrics.
  *
- * - Accepts a prompt as `step.input_query`.
- * - Optionally receives lyrics from `step.input_artifacts`.
- * - The agent returns in `output_artifacts` an array with a single object:
- *   [
- *     {
- *       tags: string[],
- *       lyrics: string,
- *       title: string,
- *       duration: number,
- *       songUrl: string
- *     }
- *   ]
- *
- * @async
- * @function handleCallSongGenerator
- * @param {any} step - The current step data.
- * @param {any} payments - The Nevermined Payments instance.
- * @returns {Promise<void>}
+ * @param step - The current step object.
+ * @param payments - The Payments instance.
+ * @returns {Promise<void>} - A promise that resolves when the song generation task completes or fails.
  */
 export async function handleCallSongGenerator(step: any, payments: any) {
-  // Ensure we have enough balance on the plan
   const hasBalance = await ensureSufficientBalance(
     SONG_GENERATOR_PLAN_DID,
     step,
@@ -193,63 +285,44 @@ export async function handleCallSongGenerator(step: any, payments: any) {
   const accessConfig = await payments.query.getServiceAccessConfig(
     SONG_GENERATOR_DID
   );
-
-  // Extract the main prompt from input_query
   const prompt = step.input_query;
-
-  // Optionally parse extra lyrics from input_artifacts
-  let artifacts: any[] = [];
-  if (hasSongMetadata(step)) {
-    artifacts = JSON.parse(step.input_artifacts || "[]");
-  }
-
-  const taskData = {
-    query: prompt, // Main prompt for the song
-    name: step.name,
-    artifacts: artifacts,
-  };
+  const artifacts = hasSongMetadata(step)
+    ? safeParse(step.input_artifacts)
+    : [];
+  const taskData = { query: prompt, name: step.name, artifacts };
 
   logger.info(
     `Creating task for Song Generator Agent with prompt: "${prompt}" and optional lyrics.`
   );
 
-  const result = await payments.query.createTask(
-    SONG_GENERATOR_DID,
-    taskData,
-    accessConfig,
-    async (cbData) => {
-      const taskLog = JSON.parse(cbData);
-
-      if (taskLog.task_status === AgentExecutionStatus.Completed) {
-        await validateSongGenerationTask(
-          taskLog.task_id,
+  try {
+    await retryOperation(
+      () =>
+        executeTaskWithValidation(
+          payments,
           SONG_GENERATOR_DID,
+          taskData,
           accessConfig,
-          step,
-          payments
-        );
-      }
-    }
-  );
-
-  logMessage(payments, {
-    task_id: step.task_id,
-    level: result.status === 201 ? "info" : "error",
-    message:
-      result.status === 201
-        ? `Song generation task created successfully (Task ID: ${result.data.task.task_id}).`
-        : `Error creating Song Generator Task: ${JSON.stringify(result.data)}`,
-  });
+          validateSongGenerationTask,
+          step
+        ),
+      2
+    );
+  } catch (error: any) {
+    await updateStepFailure(
+      step,
+      payments,
+      `Song generation task failed: ${error.message || error}`
+    );
+  }
 }
 
 /**
- * Handles the generation of a music script by calling the Music Script Generator Agent.
+ * Handles the generation of a music script by invoking the Music Script Generator Agent.
  *
- * @async
- * @function handleGenerateMusicScript
- * @param {any} step - The current step data.
- * @param {any} payments - The Nevermined Payments instance.
- * @returns {Promise<void>}
+ * @param step - The current step object.
+ * @param payments - The Payments instance.
+ * @returns {Promise<void>} - A promise that resolves when the music script generation task completes or fails.
  */
 export async function handleGenerateMusicScript(step: any, payments: any) {
   const hasBalance = await ensureSufficientBalance(
@@ -262,72 +335,50 @@ export async function handleGenerateMusicScript(step: any, payments: any) {
   const accessConfig = await payments.query.getServiceAccessConfig(
     MUSIC_SCRIPT_GENERATOR_DID
   );
-
   const taskData = {
-    query: step.input_query, // Possibly the idea for the music video
+    query: step.input_query,
     name: step.name,
     additional_params: [],
-    artifacts: JSON.parse(step.input_artifacts || "[]"),
+    artifacts: safeParse(step.input_artifacts),
   };
 
-  const result = await payments.query.createTask(
-    MUSIC_SCRIPT_GENERATOR_DID,
-    taskData,
-    accessConfig,
-    async (cbData) => {
-      const taskLog = JSON.parse(cbData);
-
-      if (taskLog.task_status === AgentExecutionStatus.Completed) {
-        await validateMusicScriptTask(
-          taskLog.task_id,
+  try {
+    await retryOperation(
+      () =>
+        executeTaskWithValidation(
+          payments,
           MUSIC_SCRIPT_GENERATOR_DID,
+          taskData,
           accessConfig,
-          step,
-          payments
-        );
-      }
-    }
-  );
-
-  logMessage(payments, {
-    task_id: step.task_id,
-    level: result.status === 201 ? "info" : "error",
-    message:
-      result.status === 201
-        ? `Music script task created successfully (Task ID: ${result.data.task.task_id}).`
-        : `Error querying Music Script Generator: ${JSON.stringify(
-            result.data
-          )}`,
-  });
+          validateMusicScriptTask,
+          step
+        ),
+      2
+    );
+  } catch (error: any) {
+    await updateStepFailure(
+      step,
+      payments,
+      `Music script task failed: ${error.message || error}`
+    );
+  }
 }
 
 /**
- * Invokes the Character Generator Agent to generate characters for the music video.
- * The number of characters is determined by the step.input_artifacts from the previous step.
- * The agent returns an array of character objects in `output_artifacts`.
- * @async
- * @function handleGenerateCharacters
- * @param {any} step - The current step data.
- * @param {any} payments - The Nevermined Payments instance.
- * @returns {Promise<void>}
+ * Invokes the Images Generator Agent to generate images for characters and settings.
+ *
+ * @param step - The current step object.
+ * @param payments - The Payments instance.
+ * @returns {Promise<void>} - A promise that resolves when all image generation tasks complete or fail.
  */
-export async function handleGenerateCharacters(step: any, payments: any) {
-  let artifacts: any[] = [];
-  if (step.input_artifacts) {
-    logger.info(
-      `Parsing input_artifacts for callCharacterGenerator: ${step.input_artifacts}`
-    );
-    try {
-      artifacts = JSON.parse(step.input_artifacts || "[]");
-    } catch (err) {
-      logger.error(
-        "Failed to parse input_artifacts for callCharacterGenerator."
-      );
-    }
+export async function handleCallImagesGenerator(step: any, payments: any) {
+  const artifactsArray = safeParse(step.input_artifacts);
+  if (!artifactsArray || artifactsArray.length === 0) {
+    logger.error("No input artifacts provided for callImagesGenerator.");
+    return;
   }
-  const [{ characters, duration, songUrl, prompts }] = artifacts;
+  const [{ characters, settings, duration, songUrl, prompts }] = artifactsArray;
 
-  // Ensure enough balance for multiple tasks
   const hasBalance = await ensureSufficientBalance(
     VIDEO_GENERATOR_PLAN_DID,
     step,
@@ -340,182 +391,147 @@ export async function handleGenerateCharacters(step: any, payments: any) {
     VIDEO_GENERATOR_DID
   );
 
-  // Create a task for each character
-  const tasksPromises = characters.map(async (character: any) => {
+  /**
+   * Creates an image generation task for a given subject.
+   *
+   * @param subject - The subject object (character or setting).
+   * @param subjectType - The type of the subject, either "character" or "setting".
+   * @returns {Promise<any>} - A promise that resolves with the validated task artifacts.
+   */
+  async function createImageTask(
+    subject: any,
+    subjectType: "character" | "setting"
+  ): Promise<any> {
+    const taskData = {
+      name: step.name,
+      query: subject.imagePrompt,
+      additional_params: [{ inference_type: "text2image" }],
+    };
     logger.info(
-      `Creating task for Character Generator Agent with character: "${character.name}"`
+      `Creating task for Image Generator Agent with ${subjectType}: "${subject.name}"`
     );
-    return new Promise(async (resolve, reject) => {
-      const taskData = {
-        name: step.name,
-        query: character.image_prompt,
-        additional_params: [
-          {
-            inference_type: "text2image",
-          },
-        ],
-      };
-
-      const createResult = await payments.query.createTask(
-        VIDEO_GENERATOR_DID,
-        taskData,
-        accessConfig,
-        async (cbData) => {
-          const taskLog = JSON.parse(cbData);
-          if (taskLog.task_status === AgentExecutionStatus.Completed) {
-            try {
-              const artifacts = await validateCharacterGenerationTask(
-                taskLog.task_id,
-                VIDEO_GENERATOR_DID,
-                accessConfig,
-                payments
-              );
-              resolve(artifacts);
-            } catch (err2) {
-              reject(err2);
-            }
-          }
-        }
-      );
-
-      if (createResult.status !== 201) {
-        reject(
-          `Error creating character generation task: ${JSON.stringify(
-            createResult.data
-          )}`
-        );
-      }
-    });
-  });
+    return retryOperation(
+      () =>
+        executeTaskWithValidation(
+          payments,
+          VIDEO_GENERATOR_DID,
+          taskData,
+          accessConfig,
+          (taskId, agentDid, accessCfg, _step, payments) =>
+            validateImageGenerationTask(
+              taskId,
+              agentDid,
+              accessCfg,
+              payments,
+              subject.id || subject.name,
+              subjectType
+            ),
+          step
+        ),
+      2
+    );
+  }
 
   try {
-    const results = await Promise.all(tasksPromises);
+    const charactersPromises = characters.map((character: any) =>
+      createImageTask(character, "character")
+    );
+    const settingsPromises = settings.map((setting: any) =>
+      createImageTask(setting, "setting")
+    );
+    const results = await Promise.all([
+      ...charactersPromises,
+      ...settingsPromises,
+    ]);
 
-    //Append to each character its image url
-    results.forEach((result, index) => {
-      characters[index].imageUrl = result;
+    // Update the subjects with their generated image URL.
+    results.forEach((result) => {
+      if (result.subjectType === "character") {
+        const char = characters.find((c: any) => c.name === result.id);
+        if (char) char.imageUrl = result.url;
+      } else if (result.subjectType === "setting") {
+        const sett = settings.find((s: any) => s.id === result.id);
+        if (sett) sett.imageUrl = result.url;
+      }
     });
 
-    const updateResult = await payments.query.updateStep(step.did, {
-      ...step,
-      step_status: AgentExecutionStatus.Completed,
-      output: "All character generation tasks completed",
-      output_artifacts: [
-        {
-          characters,
-          duration,
-          songUrl,
-          prompts,
-        },
-      ],
-    });
-
-    logMessage(payments, {
-      task_id: step.task_id,
-      level: updateResult.status === 201 ? "info" : "error",
-      message:
-        updateResult.status === 201
-          ? "Successfully generated all characters."
-          : `Error updating step with characters: ${JSON.stringify(
-              updateResult.data
-            )}`,
-    });
-  } catch (err) {
-    logger.error(`Character generation failed: ${err}`);
     await payments.query.updateStep(step.did, {
       ...step,
-      step_status: "Failed",
-      output: `Error generating characters: ${err}`,
+      step_status: AgentExecutionStatus.Completed,
+      output: "All image generation tasks completed",
+      output_artifacts: [{ characters, settings, duration, songUrl, prompts }],
     });
+  } catch (error: any) {
+    logger.error(
+      `Image generation failed: ${error.message || error}. Aborting task`
+    );
+    await updateStepFailure(
+      step,
+      payments,
+      `Image generation failed: ${error.message || error}`
+    );
   }
 }
 
 /**
- * Invokes the Video Generator Agent for each prompt in parallel.
- * The number of prompts is determined by the step.input_artifacts from the previous step.
+ * Creates a video generation task for a single prompt.
  *
- * @async
- * @function handleCallVideoGenerator
- * @param {any} step - The current step data.
- * @param {any} payments - The Nevermined Payments instance.
- * @returns {Promise<void>}
+ * This function performs one attempt to create a task. If any error occurs,
+ * it is thrown so that the caller (using retryOperation) can retry as needed.
+ *
+ * @param promptObject - The prompt object containing video generation parameters.
+ * @param settings - Array of available setting objects.
+ * @param characters - Array of available character objects.
+ * @param accessConfig - The access configuration for the Video Generator Agent.
+ * @param payments - The Payments instance.
+ * @param step - The current step object.
+ * @returns {Promise<any>} - A promise resolving with validated task artifacts.
+ * @throws {Error} - If the task creation or validation fails.
  */
-export async function handleCallVideoGenerator(step: any, payments: any) {
-  let artifacts: any[] = [];
-  logger.info(
-    `Parsing input_artifacts for callVideoGenerator: ${step.input_artifacts}`
-  );
-  try {
-    artifacts = JSON.parse(step.input_artifacts || "[]");
-  } catch (err) {
-    logger.error("Failed to parse input_artifacts for callVideoGenerator.");
+async function createVideoTaskForPrompt(
+  promptObject: any,
+  settings: any[],
+  characters: any[],
+  accessConfig: any,
+  payments: any,
+  step: any
+): Promise<any> {
+  // Select a setting: try to match promptObject.settingId; otherwise choose one at random.
+  let setting = settings.find((s: any) => s.id === promptObject.settingId);
+  if (!setting) {
+    setting = settings[Math.floor(Math.random() * settings.length)];
   }
-
-  // Suppose we have an array of prompts for each shot
-  const [{ prompts, characters, duration, ...inputArtifacts }] = artifacts;
-
-  //Repeat prompts until we have enough to fill the song duration (each prompt is a 5 seconds video)
-  const promptsToFillDuration: any = [];
-  let totalPromptsDuration = 0;
-  while (totalPromptsDuration < duration) {
-    promptsToFillDuration.push(...prompts);
-    totalPromptsDuration += prompts.length * 5;
-  }
-
-  logger.info(
-    `Creating video generation tasks for ${promptsToFillDuration.length} prompts...`
+  // Filter characters that are included in the scene.
+  const charactersInScene = characters.filter((c: any) =>
+    promptObject.charactersInScene.includes(c.name)
   );
-
-  // Ensure enough balance for multiple tasks
-  const hasBalance = await ensureSufficientBalance(
-    VIDEO_GENERATOR_PLAN_DID,
-    step,
-    payments,
-    promptsToFillDuration.length
-  );
-  if (!hasBalance) return;
-
-  const accessConfig = await payments.query.getServiceAccessConfig(
-    VIDEO_GENERATOR_DID
-  );
-
-  const tasksPromises = promptsToFillDuration.map(async (promptObject) => {
-    logger.info(
-      `Creating task for Video Generator Agent with prompt: "${JSON.stringify(
-        promptObject
-      )}"`
-    );
-
-    //For each video, collect its image prompt, its video prompt and the character image url for the characters in the scene
-    let character = characters.find(
-      (character) => character.name === promptObject.charactersInScene[0]
-    );
-    if (!character) {
-      //get a random character
-      character = characters[Math.floor(Math.random() * characters.length)];
-    }
-
-    return new Promise(async (resolve, reject) => {
-      const taskData = {
-        name: step.name,
-        query: promptObject.imagePrompt,
-        additional_params: [
-          {
-            inference_type: "text2video",
-            image_url: character.imageUrl,
-            video_prompt: promptObject.videoPrompt,
-          },
+  // Build task data.
+  const taskData = {
+    name: step.name,
+    query: promptObject.prompt,
+    additional_params: [
+      {
+        inference_type: "text2video",
+        images: [
+          setting.imageUrl,
+          ...charactersInScene.map((c: any) => c.imageUrl),
         ],
-      };
+        duration: promptObject.duration,
+      },
+    ],
+  };
 
-      const createResult = await payments.query.createTask(
+  // Attempt to create the task.
+  return new Promise<any>((resolve, reject) => {
+    payments.query
+      .createTask(
         VIDEO_GENERATOR_DID,
         taskData,
         accessConfig,
-        async (cbData) => {
-          const taskLog = JSON.parse(cbData);
-          if (taskLog.task_status === AgentExecutionStatus.Completed) {
-            try {
+        async (cbData: any) => {
+          try {
+            const taskLog = JSON.parse(cbData);
+            if (taskLog.task_status === AgentExecutionStatus.Completed) {
               const artifacts = await validateVideoGenerationTask(
                 taskLog.task_id,
                 VIDEO_GENERATOR_DID,
@@ -523,89 +539,248 @@ export async function handleCallVideoGenerator(step: any, payments: any) {
                 payments
               );
               resolve(artifacts);
-            } catch (err2) {
-              reject(err2);
+            } else if (taskLog.task_status === AgentExecutionStatus.Failed) {
+              reject(new Error(`Task ${taskLog.task_id} failed`));
             }
+          } catch (err) {
+            reject(err);
           }
         }
-      );
-
-      if (createResult.status !== 201) {
-        reject(
-          `Error creating video generation task: ${JSON.stringify(
-            createResult.data
-          )}`
-        );
-      }
-    });
+      )
+      .then((result: any) => {
+        if (result.status !== 201) {
+          reject(
+            new Error(
+              `Error creating video generation task: ${JSON.stringify(
+                result.data
+              )}`
+            )
+          );
+        }
+      })
+      .catch((err: any) => {
+        reject(err);
+      });
   });
+}
+/**
+ * Handles video generation tasks for multiple prompts.
+ *
+ * @param step - The current step data.
+ * @param payments - The Payments instance.
+ * @returns {Promise<void>} - A promise that resolves when all video tasks complete or fails.
+ */
+export async function handleCallVideoGenerator(
+  step: any,
+  payments: any
+): Promise<void> {
+  const artifactsArray = safeParse(step.input_artifacts);
+  if (!artifactsArray || artifactsArray.length === 0) {
+    logger.error("No input artifacts provided for callVideoGenerator.");
+    return;
+  }
+  const [{ prompts, characters, settings, duration, ...inputArtifacts }] =
+    artifactsArray;
+  logger.info(
+    `Creating video generation tasks for ${prompts.length} prompts...`
+  );
+
+  const hasBalance = await ensureSufficientBalance(
+    VIDEO_GENERATOR_PLAN_DID,
+    step,
+    payments,
+    prompts.length
+  );
+  if (!hasBalance) return;
+
+  const accessConfig = await payments.query.getServiceAccessConfig(
+    VIDEO_GENERATOR_DID
+  );
+
+  // Use retryOperation to handle retries.
+  const videoTaskPromises = prompts.map((promptObject: any) =>
+    retryOperation(
+      () =>
+        createVideoTaskForPrompt(
+          promptObject,
+          settings,
+          characters,
+          accessConfig,
+          payments,
+          step
+        ),
+      2
+    )
+  );
 
   try {
-    const results: any = [];
-    for (const res of tasksPromises) {
-      results.push(await res());
-    }
-
-    const updateResult = await payments.query.updateStep(step.did, {
+    const results = await Promise.all(videoTaskPromises);
+    await payments.query.updateStep(step.did, {
       ...step,
       step_status: AgentExecutionStatus.Completed,
       output: "All video generation tasks completed",
       output_artifacts: [
-        {
-          ...inputArtifacts,
-          duration,
-          generatedVideos: results,
-        },
+        { ...inputArtifacts, duration, generatedVideos: results },
       ],
     });
-
-    logMessage(payments, {
-      task_id: step.task_id,
-      level: updateResult.status === 201 ? "info" : "error",
-      message:
-        updateResult.status === 201
-          ? "Successfully generated all video prompts."
-          : `Error updating step with videos: ${JSON.stringify(
-              updateResult.data
-            )}`,
-    });
-  } catch (err) {
-    logger.error(`Video generation failed: ${err}`);
-    await payments.query.updateStep(step.did, {
-      ...step,
-      step_status: "Failed",
-      output: `Error generating videos: ${err}`,
-    });
+  } catch (error: any) {
+    logger.error(
+      `Video generation failed: ${error.message || error}. Aborting task`
+    );
+    await updateStepFailure(
+      step,
+      payments,
+      `Video generation failed: ${error.message || error}`
+    );
   }
 }
 
+/* -------------------------------------
+   Video Compilation Helpers
+------------------------------------- */
+
 /**
- * Handles the "compileVideo" step, merging multiple video clips to match
- * the song duration and then overlaying the audio track.
+ * Retrieves durations for a list of video URLs and returns valid videos.
  *
- * @async
- * @function handleCompileVideo
- * @param {any} step - The current step data.
- * @param {any} payments - The Nevermined Payments instance.
+ * @param videoUrls - Array of video URLs.
+ * @returns {Promise<Array<{url: string, duration: number}>>} - Array of valid video objects.
+ */
+async function getValidVideos(
+  videoUrls: string[]
+): Promise<Array<{ url: string; duration: number }>> {
+  const videoList = await Promise.all(
+    videoUrls.map(async (videoUrl: string) => {
+      try {
+        const dur = await getVideoDuration(videoUrl);
+        return { url: videoUrl, duration: dur };
+      } catch (err) {
+        logger.warn(
+          `Skipping ${videoUrl}, failed to retrieve duration: ${
+            (err as Error).message
+          }`
+        );
+        return null;
+      }
+    })
+  );
+  return videoList.filter(
+    (v): v is { url: string; duration: number } => v !== null
+  );
+}
+
+/**
+ * Merges multiple video clips using FFmpeg.
+ *
+ * @param videos - Array of valid video objects.
+ * @param outputPath - The temporary output file path.
  * @returns {Promise<void>}
  */
-export async function handleCompileVideo(step: any, payments: any) {
+async function mergeVideos(
+  videos: Array<{ url: string; duration: number }>,
+  outputPath: string
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    let ffmpegChain = ffmpeg();
+    videos.forEach((clip) => {
+      ffmpegChain = ffmpegChain.input(clip.url);
+    });
+    ffmpegChain
+      .complexFilter([
+        { filter: "concat", options: { n: videos.length, v: 1, a: 0 } },
+      ])
+      .on("start", (cmd) => {
+        logger.info(`FFmpeg merge (video only) started with command: ${cmd}`);
+      })
+      .on("error", (err) => {
+        logger.error(`Error merging videos: ${(err as Error).message}`);
+        reject(err);
+      })
+      .on("end", () => {
+        logger.info("Video-only merge completed successfully.");
+        resolve();
+      })
+      .save(outputPath);
+  });
+}
+
+/**
+ * Overlays an audio track onto a video using FFmpeg.
+ *
+ * @param videoPath - The path of the video file.
+ * @param audioUrl - The URL of the audio track.
+ * @param outputPath - The final output file path.
+ * @returns {Promise<void>}
+ */
+async function addAudioToVideo(
+  videoPath: string,
+  audioUrl: string,
+  outputPath: string
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    ffmpeg()
+      .input(videoPath)
+      .input(audioUrl)
+      .videoCodec("copy")
+      .audioCodec("aac")
+      .on("start", (cmd) => {
+        logger.info(`FFmpeg final merge (audio) started with command: ${cmd}`);
+      })
+      .on("error", (err) => {
+        logger.error(`Error adding audio track: ${(err as Error).message}`);
+        reject(err);
+      })
+      .on("end", () => {
+        logger.info("Final video with audio merged successfully.");
+        resolve();
+      })
+      .save(outputPath);
+  });
+}
+
+/**
+ * Uploads a video file to S3 and returns its public URL.
+ *
+ * @param filePath - The local file path of the video.
+ * @returns {Promise<string>} - The URL of the uploaded video.
+ */
+async function uploadVideoToS3(filePath: string): Promise<string> {
+  const s3 = new S3({
+    region: AWS_REGION,
+    accessKeyId: AWS_ACCESS_KEY_ID,
+    secretAccessKey: AWS_SECRET_ACCESS_KEY,
+  });
+  const s3Bucket = "nvm-music-video-swarm-bucket";
+  const s3Key = path.basename(filePath);
+  const fileStream = fs.createReadStream(filePath);
+  logger.info(`Uploading final video to S3: ${s3Bucket}/${s3Key}`);
+  const uploadResult = await s3
+    .upload({
+      Bucket: s3Bucket,
+      Key: s3Key,
+      Body: fileStream,
+      ContentType: "video/mp4",
+    })
+    .promise();
+  logger.info(`Final video uploaded to S3: ${uploadResult.Location}`);
+  return uploadResult.Location;
+}
+
+/**
+ * Handles the "compileVideo" step by concatenating video clips,
+ * overlaying audio, uploading the final output to S3, and updating the step.
+ *
+ * @param step - The current step data.
+ * @param payments - The Payments instance.
+ * @returns {Promise<void>}
+ */
+export async function handleCompileVideo(
+  step: any,
+  payments: any
+): Promise<void> {
   try {
-    // 1. Parse the input artifacts to retrieve the required data (song duration, generated videos, etc.)
-    // let data: any;
-    // try {
-    //   data = JSON.parse(step.input_artifacts);
-    // } catch (parseErr) {
-    //   logger.error(
-    //     "Failed to parse input artifacts in compileVideo step:",
-    //     parseErr
-    //   );
-    //   throw parseErr;
-    // }
-    const [{ generatedVideos, duration, songUrl }] = JSON.parse(
+    const [{ generatedVideos, duration, songUrl }] = safeParse(
       step.input_artifacts
     );
-
     if (
       !generatedVideos ||
       !Array.isArray(generatedVideos) ||
@@ -620,192 +795,39 @@ export async function handleCompileVideo(step: any, payments: any) {
       throw new Error("No song/audio URL provided for final compilation.");
     }
 
-    // 2. Retrieve durations for each video URL
-    //    We'll create an array of objects: { url, duration: number }.
     logger.info(`Retrieving durations for ${generatedVideos.length} videos...`);
-
-    const videoList = await Promise.all(
-      generatedVideos.map(async (videoUrl: string) => {
-        try {
-          const dur = await getVideoDuration(videoUrl);
-          return { url: videoUrl, duration: dur };
-        } catch (err) {
-          logger.warn(
-            `Skipping ${videoUrl}, failed to retrieve duration: ${err.message}`
-          );
-          return null; // We'll filter out null below
-        }
-      })
-    );
-
-    // Filter out any null entries (failed to retrieve duration)
-    const validVideos = videoList.filter(Boolean) as {
-      url: string;
-      duration: number;
-    }[];
-
+    const validVideos = await getValidVideos(generatedVideos);
     if (validVideos.length === 0) {
       throw new Error("No valid videos with durations were found.");
     }
 
-    // 3. Build a compilation list until totalVideoTime >= song duration
-    let totalVideoTime = 0;
-    const compilationList: { url: string; duration: number }[] = [];
-
-    while (totalVideoTime < duration) {
-      const randomIndex = Math.floor(Math.random() * validVideos.length);
-      const chosen = validVideos[randomIndex];
-      if (!chosen || !chosen.url || !chosen.duration) {
-        continue;
-      }
-      compilationList.push(chosen);
-      totalVideoTime += chosen.duration;
-    }
-
-    logger.info(
-      `Selected ${compilationList.length} video segments for final compilation (~${totalVideoTime}s total).`
+    const tempOutputPath = path.join(
+      "/tmp",
+      `final_compilation_${Date.now()}.mp4`
     );
-
-    // 3. Use Fluent FFmpeg to concatenate these selected video clips into a single video.
-    //    Then overlay/merge the audio from songUrl.
-    //    NOTE: If songUrl or video URLs are remote, ffmpeg can usually handle them directly,
-    //    but for complex scenarios, you may need to download them locally first.
-
-    // Create a temporary file name for the final video
-    const outputFileName = `final_compilation_${Date.now()}.mp4`;
-    const tempOutputPath = path.join("/tmp", outputFileName);
-
-    // Merge the videos (without audio).
-    await new Promise<void>((resolve, reject) => {
-      // Start fluent-ffmpeg
-      let ffmpegChain = ffmpeg();
-
-      // Add each selected video as input
-      compilationList.forEach((clip) => {
-        ffmpegChain = ffmpegChain.input(clip.url);
-      });
-
-      // Use the concat filter. This example uses the "concat" filter with n inputs.
-      // Each input might have different frame rates, resolutions, etc. In real usage,
-      // you may need to ensure consistent formats or add scaling filters.
-      ffmpegChain
-        .complexFilter([
-          {
-            filter: "concat",
-            options: {
-              n: compilationList.length,
-              v: 1,
-              a: 0,
-            },
-          },
-        ])
-        .on("start", (cmd) => {
-          logger.info(`FFmpeg merge (video only) started with command: ${cmd}`);
-        })
-        .on("error", (err) => {
-          logger.error(`Error merging videos: ${err.message}`);
-          reject(err);
-        })
-        .on("end", () => {
-          logger.info("Video-only merge completed successfully.");
-          resolve();
-        })
-        .save(tempOutputPath);
-    });
-
-    // Step B: Overlay/merge the audio using a second pass.
-    // Alternatively, you could do this in one pass with a more complex filter,
-    // but splitting into two can be simpler for demonstration.
+    await mergeVideos(validVideos, tempOutputPath);
 
     const finalOutputPath = path.join(
       "/tmp",
       `final_with_audio_${Date.now()}.mp4`
     );
+    await addAudioToVideo(tempOutputPath, songUrl, finalOutputPath);
 
-    await new Promise<void>((resolve, reject) => {
-      ffmpeg()
-        .input(tempOutputPath) // The merged video
-        .input(songUrl) // The generated song
-        .videoCodec("copy") // Keep the video stream as-is
-        .audioCodec("aac") // Transcode or copy as needed
-        .on("start", (cmd) => {
-          logger.info(
-            `FFmpeg final merge (audio) started with command: ${cmd}`
-          );
-        })
-        .on("error", (err) => {
-          logger.error(`Error adding audio track: ${err.message}`);
-          reject(err);
-        })
-        .on("end", () => {
-          logger.info("Final video with audio merged successfully.");
-          resolve();
-        })
-        .save(finalOutputPath);
-    });
-
-    // 4. Upload finalOutputPath to S3 with public permissions.
-    //    (Adjust AWS credentials and S3 settings as needed.)
-
-    const s3 = new S3({
-      region: AWS_REGION,
-      accessKeyId: AWS_ACCESS_KEY_ID,
-      secretAccessKey: AWS_SECRET_ACCESS_KEY,
-    });
-
-    const s3Bucket = "nvm-music-video-swarm-bucket";
-    const s3Key = `${path.basename(finalOutputPath)}`;
-
-    let finalVideoUrl: string;
-
-    try {
-      const fileStream = fs.createReadStream(finalOutputPath);
-
-      logger.info(`Uploading final video to S3: ${s3Bucket}/${s3Key}`);
-      const uploadResult = await s3
-        .upload({
-          Bucket: s3Bucket,
-          Key: s3Key,
-          Body: fileStream,
-          ContentType: "video/mp4",
-        })
-        .promise();
-
-      finalVideoUrl = uploadResult.Location; // The public URL to the S3 object
-      logger.info(`Final video uploaded to S3: ${finalVideoUrl}`);
-    } catch (uploadErr) {
-      logger.error(`Failed to upload final video to S3: ${uploadErr.message}`);
-      throw uploadErr;
-    }
-
-    // 5. Update the step as Completed, storing the finalVideoUrl in output_artifacts
-    const updateResult = await payments.query.updateStep(step.did, {
+    const finalVideoUrl = await uploadVideoToS3(finalOutputPath);
+    await payments.query.updateStep(step.did, {
       ...step,
       step_status: AgentExecutionStatus.Completed,
       output: "Video clip compilation completed",
       output_artifacts: [finalVideoUrl],
     });
 
-    if (updateResult.status === 201) {
-      await logMessage(payments, {
-        task_id: step.task_id,
-        level: "info",
-        message: `Final music video compiled and uploaded: ${finalVideoUrl}`,
-      });
-      logger.info(`Step updated with final video URL: ${finalVideoUrl}`);
-    } else {
-      logger.error(`Error updating step: ${JSON.stringify(updateResult.data)}`);
-    }
-
     fs.unlinkSync(tempOutputPath);
     fs.unlinkSync(finalOutputPath);
   } catch (err: any) {
-    logger.error(`Error in handleCompileVideo: ${err?.message || err}`);
-    // Mark step as Failed
-    await payments.query.updateStep(step.did, {
-      ...step,
-      step_status: "Failed",
-      output: `Compilation failed: ${err?.message || err}`,
-    });
+    await updateStepFailure(
+      step,
+      payments,
+      `Compilation failed: ${err.message || err}`
+    );
   }
 }

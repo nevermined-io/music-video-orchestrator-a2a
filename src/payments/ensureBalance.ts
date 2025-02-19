@@ -19,7 +19,10 @@ export async function ensureSufficientBalance(
   payments: any,
   requiredBalance: number = 1
 ): Promise<boolean> {
-  logger.info(`Checking balance for plan ${planDid}...`);
+  //logger.info(`Checking balance for plan ${planDid}...`);
+  //const planDDO = await payments.getAssetDDO(planDid);
+  //logger.info(`Plan DDO: ${JSON.stringify(planDDO)}`);
+
   const balanceResult = await payments.getPlanBalance(planDid);
 
   if (balanceResult.balance < requiredBalance && !balanceResult.isOwner) {
