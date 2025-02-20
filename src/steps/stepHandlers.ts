@@ -377,7 +377,8 @@ export async function handleCallImagesGenerator(step: any, payments: any) {
     logger.error("No input artifacts provided for callImagesGenerator.");
     return;
   }
-  const [{ characters, settings, duration, songUrl, prompts }] = artifactsArray;
+  const [{ characters, settings, duration, songUrl, prompts, title }] =
+    artifactsArray;
 
   const hasBalance = await ensureSufficientBalance(
     VIDEO_GENERATOR_PLAN_DID,
@@ -459,7 +460,9 @@ export async function handleCallImagesGenerator(step: any, payments: any) {
       ...step,
       step_status: AgentExecutionStatus.Completed,
       output: "All image generation tasks completed",
-      output_artifacts: [{ characters, settings, duration, songUrl, prompts }],
+      output_artifacts: [
+        { characters, settings, duration, songUrl, prompts, title },
+      ],
     });
   } catch (error: any) {
     logger.error(
@@ -743,14 +746,17 @@ async function addAudioToVideo(
  * @param filePath - The local file path of the video.
  * @returns {Promise<string>} - The URL of the uploaded video.
  */
-async function uploadVideoToS3(filePath: string): Promise<string> {
+async function uploadVideoToS3(
+  filePath: string,
+  fileName: string
+): Promise<string> {
   const s3 = new S3({
     region: AWS_REGION,
     accessKeyId: AWS_ACCESS_KEY_ID,
     secretAccessKey: AWS_SECRET_ACCESS_KEY,
   });
   const s3Bucket = "nvm-music-video-swarm-bucket";
-  const s3Key = path.basename(filePath);
+  const s3Key = path.basename(fileName);
   const fileStream = fs.createReadStream(filePath);
   logger.info(`Uploading final video to S3: ${s3Bucket}/${s3Key}`);
   const uploadResult = await s3
@@ -778,7 +784,7 @@ export async function handleCompileVideo(
   payments: any
 ): Promise<void> {
   try {
-    const [{ generatedVideos, duration, songUrl }] = safeParse(
+    const [{ generatedVideos, duration, songUrl, title }] = safeParse(
       step.input_artifacts
     );
     if (
@@ -812,8 +818,13 @@ export async function handleCompileVideo(
       `final_with_audio_${Date.now()}.mp4`
     );
     await addAudioToVideo(tempOutputPath, songUrl, finalOutputPath);
+    const convertedTitle =
+      title.replace(/[^a-z0-9]/gi, "_").toLowerCase() + ".mp4";
 
-    const finalVideoUrl = await uploadVideoToS3(finalOutputPath);
+    const finalVideoUrl = await uploadVideoToS3(
+      finalOutputPath,
+      convertedTitle
+    );
     await payments.query.updateStep(step.did, {
       ...step,
       step_status: AgentExecutionStatus.Completed,

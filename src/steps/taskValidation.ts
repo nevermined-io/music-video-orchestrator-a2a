@@ -106,7 +106,7 @@ export async function validateMusicScriptTask(
   const [{ transformedScenes, characters, settings }] = JSON.parse(
     taskData.task.output_artifacts || "[]"
   );
-  const { tags, lyrics, duration, songUrl } = JSON.parse(
+  const { tags, lyrics, duration, songUrl, title } = JSON.parse(
     parentStep.input_artifacts || "[]"
   );
 
@@ -124,6 +124,7 @@ export async function validateMusicScriptTask(
         songUrl,
         prompts: transformedScenes,
         characters,
+        title,
       },
     ],
   });
