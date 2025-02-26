@@ -1,5 +1,3 @@
-Ha razonado durante unos pocos segundos
-
 [![banner](https://raw.githubusercontent.com/nevermined-io/assets/main/images/logo/banner_logo.png)](https://nevermined.io)
 
 Music Video Orchestrator Agent using Nevermined's Payments API (TypeScript)
