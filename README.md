@@ -53,8 +53,8 @@ Table of Contents
 1.  **Clone** the repository:
     
     ```bash
-    git clone https://github.com/nevermined-io/music-video-orchestrator-agent.git
-    cd music-video-orchestrator-agent
+    git clone https://github.com/nevermined-io/music-video-orchestrator.git
+    cd music-video-orchestrator
     ```
     
 2.  **Install** dependencies:
