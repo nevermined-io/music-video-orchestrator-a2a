@@ -44,6 +44,12 @@ async function updateStepFailure(
   payments: any,
   errorMessage: string
 ): Promise<void> {
+  await logMessage(payments, {
+    task_id: step.task_id,
+    level: "error",
+    message: errorMessage,
+  });
+
   await payments.query.updateStep(step.did, {
     ...step,
     step_status: AgentExecutionStatus.Failed,
@@ -170,11 +176,6 @@ export function processSteps(payments: any) {
     );
 
     const step = await payments.query.getStep(eventData.step_id);
-    logMessage(payments, {
-      task_id: step.task_id,
-      level: "info",
-      message: `Processing step ${step.step_id} [${step.step_status}]: ${step.name}`,
-    });
 
     // Only process steps that are Pending
     if (step.step_status !== AgentExecutionStatus.Pending) {
@@ -257,6 +258,14 @@ export async function handleInitStep(step: any, payments: any) {
     },
   ];
 
+  await logMessage(payments, {
+    task_id: step.task_id,
+    level: "info",
+    message: `Creating steps for task ${step.task_id}: ${steps
+      .map((s) => s.name)
+      .join(", ")}`,
+  });
+
   await payments.query.createSteps(step.did, step.task_id, { steps });
 
   // Mark the init step as completed.
@@ -275,6 +284,12 @@ export async function handleInitStep(step: any, payments: any) {
  * @returns {Promise<void>} - A promise that resolves when the song generation task completes or fails.
  */
 export async function handleCallSongGenerator(step: any, payments: any) {
+  logMessage(payments, {
+    task_id: step.task_id,
+    level: "info",
+    message: `Creating task for Song Generator Agent with prompt: "${step.input_query}"`,
+  });
+
   const hasBalance = await ensureSufficientBalance(
     SONG_GENERATOR_PLAN_DID,
     step,
@@ -290,10 +305,6 @@ export async function handleCallSongGenerator(step: any, payments: any) {
     ? safeParse(step.input_artifacts)
     : [];
   const taskData = { query: prompt, name: step.name, artifacts };
-
-  logger.info(
-    `Creating task for Song Generator Agent with prompt: "${prompt}" and optional lyrics.`
-  );
 
   try {
     await retryOperation(
@@ -325,6 +336,12 @@ export async function handleCallSongGenerator(step: any, payments: any) {
  * @returns {Promise<void>} - A promise that resolves when the music script generation task completes or fails.
  */
 export async function handleGenerateMusicScript(step: any, payments: any) {
+  logMessage(payments, {
+    task_id: step.task_id,
+    level: "info",
+    message: `Creating task for Music Script Generator Agent with query: "${step.input_query}"`,
+  });
+
   const hasBalance = await ensureSufficientBalance(
     MUSIC_SCRIPT_GENERATOR_PLAN_DID,
     step,
@@ -380,11 +397,17 @@ export async function handleCallImagesGenerator(step: any, payments: any) {
   const [{ characters, settings, duration, songUrl, prompts, title }] =
     artifactsArray;
 
+  logMessage(payments, {
+    task_id: step.task_id,
+    level: "info",
+    message: `Creating image generation tasks for ${characters.length} characters and ${settings.length} settings...`,
+  });
+
   const hasBalance = await ensureSufficientBalance(
     VIDEO_GENERATOR_PLAN_DID,
     step,
     payments,
-    characters.length || 1
+    characters.length + settings.length
   );
   if (!hasBalance) return;
 
@@ -408,9 +431,6 @@ export async function handleCallImagesGenerator(step: any, payments: any) {
       query: subject.imagePrompt,
       additional_params: [{ inference_type: "text2image" }],
     };
-    logger.info(
-      `Creating task for Image Generator Agent with ${subjectType}: "${subject.name}"`
-    );
     return retryOperation(
       () =>
         executeTaskWithValidation(
@@ -440,6 +460,7 @@ export async function handleCallImagesGenerator(step: any, payments: any) {
     const settingsPromises = settings.map((setting: any) =>
       createImageTask(setting, "setting")
     );
+
     const results = await Promise.all([
       ...charactersPromises,
       ...settingsPromises,
@@ -454,6 +475,16 @@ export async function handleCallImagesGenerator(step: any, payments: any) {
         const sett = settings.find((s: any) => s.id === result.id);
         if (sett) sett.imageUrl = result.url;
       }
+    });
+
+    logMessage(payments, {
+      task_id: step.task_id,
+      level: "info",
+      message: `All image generation tasks completed successfully: 
+        characters:
+        ${characters.map((c: any) => c.imageUrl).join(", ")}
+        settings:
+        ${settings.map((s: any) => s.imageUrl).join(", ")}`,
     });
 
     await payments.query.updateStep(step.did, {
@@ -508,6 +539,7 @@ async function createVideoTaskForPrompt(
   const charactersInScene = characters.filter((c: any) =>
     promptObject.charactersInScene.includes(c.name)
   );
+
   // Build task data.
   const taskData = {
     name: step.name,
@@ -523,6 +555,12 @@ async function createVideoTaskForPrompt(
       },
     ],
   };
+
+  logMessage(payments, {
+    task_id: step.task_id,
+    level: "info",
+    message: `Creating video generation task for prompt: "${promptObject.prompt}"`,
+  });
 
   // Attempt to create the task.
   return new Promise<any>((resolve, reject) => {
@@ -584,9 +622,12 @@ export async function handleCallVideoGenerator(
   }
   const [{ prompts, characters, settings, duration, ...inputArtifacts }] =
     artifactsArray;
-  logger.info(
-    `Creating video generation tasks for ${prompts.length} prompts...`
-  );
+
+  logMessage(payments, {
+    task_id: step.task_id,
+    level: "info",
+    message: `Creating video generation tasks for ${prompts.length} scenes...`,
+  });
 
   const hasBalance = await ensureSufficientBalance(
     VIDEO_GENERATOR_PLAN_DID,
@@ -618,6 +659,13 @@ export async function handleCallVideoGenerator(
 
   try {
     const results = await Promise.all(videoTaskPromises);
+
+    logMessage(payments, {
+      task_id: step.task_id,
+      level: "info",
+      message: `All video generation tasks completed successfully:`,
+    });
+
     await payments.query.updateStep(step.did, {
       ...step,
       step_status: AgentExecutionStatus.Completed,
@@ -787,6 +835,12 @@ export async function handleCompileVideo(
     const [{ generatedVideos, duration, songUrl, title }] = safeParse(
       step.input_artifacts
     );
+    logMessage(payments, {
+      task_id: step.task_id,
+      level: "info",
+      message: `Compiling video clips with audio for "${title}"...`,
+    });
+
     if (
       !generatedVideos ||
       !Array.isArray(generatedVideos) ||
@@ -801,7 +855,6 @@ export async function handleCompileVideo(
       throw new Error("No song/audio URL provided for final compilation.");
     }
 
-    logger.info(`Retrieving durations for ${generatedVideos.length} videos...`);
     const validVideos = await getValidVideos(generatedVideos);
     if (validVideos.length === 0) {
       throw new Error("No valid videos with durations were found.");
@@ -821,10 +874,17 @@ export async function handleCompileVideo(
     const convertedTitle =
       title.replace(/[^a-z0-9]/gi, "_").toLowerCase() + ".mp4";
 
+    logMessage(payments, {
+      task_id: step.task_id,
+      level: "info",
+      message: `Compilation completed for "${title}". Uploading to S3...`,
+    });
+
     const finalVideoUrl = await uploadVideoToS3(
       finalOutputPath,
       convertedTitle
     );
+
     await payments.query.updateStep(step.did, {
       ...step,
       step_status: AgentExecutionStatus.Completed,

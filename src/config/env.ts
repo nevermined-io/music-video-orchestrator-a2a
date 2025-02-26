@@ -42,6 +42,11 @@ export const VIDEO_GENERATOR_DID = process.env.VIDEO_GENERATOR_DID!;
 /********************/
 
 /**
+ * DID of our own payment plan.
+ */
+export const PLAN_DID = process.env.PLAN_DID!;
+
+/**
  * DID of the song generator payment plan.
  */
 export const SONG_GENERATOR_PLAN_DID = process.env.SONG_GENERATOR_PLAN_DID!;
@@ -63,3 +68,13 @@ export const VIDEO_GENERATOR_PLAN_DID = process.env.VIDEO_GENERATOR_PLAN_DID!;
 export const AWS_REGION = process.env.AWS_REGION!;
 export const AWS_ACCESS_KEY_ID = process.env.AWS_ACCESS_KEY_ID!;
 export const AWS_SECRET_ACCESS_KEY = process.env.AWS_SECRET_ACCESS_KEY!;
+
+/*******************/
+/*   BLOCKCHAIN    */
+/*******************/
+export const RPC_URL = process.env.RPC_URL!;
+export const PRIVATE_KEY = process.env.PRIVATE_KEY!;
+export const NETWORK_ID = parseInt(process.env.NETWORK_ID!);
+export const UNISWAP_V2_ROUTER_ADDRESS = process.env.UNISWAP_V2_ROUTER_ADDRESS!;
+export const UNISWAP_V2_FACTORY_ADDRESS =
+  process.env.UNISWAP_V2_FACTORY_ADDRESS!;
