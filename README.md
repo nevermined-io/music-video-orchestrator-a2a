@@ -27,6 +27,29 @@ While orchestrating these tasks, the system also uses **Nevermined** to:
 
 * * *
 
+**Related Projects**
+--------------------
+
+This **Music Video Orchestrator Agent** is part of a larger ecosystem of AI-driven media creation. For a complete view of how multiple agents work together, see:
+
+1.  [Song Generator Agent](https://github.com/nevermined-io/song-generation-agent)
+    
+    *   Produces lyrics, titles, and final audio tracks using LangChain + OpenAI and a chosen music generation API.
+2.  [Script Generator Agent](https://github.com/nevermined-io/movie-script-generator-agent)
+
+*   Generates cinematic scripts, extracts scene info, identifies settings and characters, producing prompts for video generation.
+3.  [Image / Video Generator Agent](https://github.com/nevermined-io/video-generator-agent)
+    
+    *   Produces Images / Video using 3rd party wrapper APIs (Fal.ai and TTapi, wrapping Flux and Kling.ai)
+
+**Workflow Example**:
+
+```
+[ User Prompt ] --> [Music Orchestrator] --> [Song Generation] --> [Script Generation] --> [Image/Video Generation] --> [Final Compilation]
+```
+
+* * *
+
 Table of Contents
 -----------------
 
