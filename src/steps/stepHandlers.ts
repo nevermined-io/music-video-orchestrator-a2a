@@ -58,22 +58,6 @@ async function updateStepFailure(
 }
 
 /**
- * Safely parses a JSON string. Returns the provided default value if parsing fails.
- *
- * @param jsonStr - The JSON string to parse.
- * @param defaultValue - The default value to return on failure.
- * @returns {any} - The parsed object or the default value.
- */
-function safeParse(jsonStr: string, defaultValue: any = []): any {
-  try {
-    return JSON.parse(jsonStr);
-  } catch (err) {
-    logger.error("Failed to parse JSON:", err);
-    return defaultValue;
-  }
-}
-
-/**
  * Generic retry helper.
  * Tries the given operation. If it fails, retries up to maxRetries times before finally rejecting.
  *
@@ -301,10 +285,12 @@ export async function handleCallSongGenerator(step: any, payments: any) {
     SONG_GENERATOR_DID
   );
   const prompt = step.input_query;
-  const artifacts = hasSongMetadata(step)
-    ? safeParse(step.input_artifacts)
-    : [];
-  const taskData = { query: prompt, name: step.name, artifacts };
+  const input_artifacts = hasSongMetadata(step) ? step.input_artifacts : [];
+  const taskData = {
+    input_query: prompt,
+    name: step.name,
+    input_artifacts,
+  };
 
   try {
     await retryOperation(
@@ -339,7 +325,7 @@ export async function handleGenerateMusicScript(step: any, payments: any) {
   logMessage(payments, {
     task_id: step.task_id,
     level: "info",
-    message: `Creating task for Music Script Generator Agent with query: "${step.input_query}"`,
+    message: `Creating task for Music Script Generator Agent with input_query: "${step.input_query}"`,
   });
 
   const hasBalance = await ensureSufficientBalance(
@@ -353,10 +339,9 @@ export async function handleGenerateMusicScript(step: any, payments: any) {
     MUSIC_SCRIPT_GENERATOR_DID
   );
   const taskData = {
-    query: step.input_query,
+    input_query: step.input_query,
     name: step.name,
-    additional_params: [],
-    artifacts: safeParse(step.input_artifacts),
+    input_artifacts: step.input_artifacts,
   };
 
   try {
@@ -389,13 +374,8 @@ export async function handleGenerateMusicScript(step: any, payments: any) {
  * @returns {Promise<void>} - A promise that resolves when all image generation tasks complete or fail.
  */
 export async function handleCallImagesGenerator(step: any, payments: any) {
-  const artifactsArray = safeParse(step.input_artifacts);
-  if (!artifactsArray || artifactsArray.length === 0) {
-    logger.error("No input artifacts provided for callImagesGenerator.");
-    return;
-  }
   const [{ characters, settings, duration, songUrl, prompts, title }] =
-    artifactsArray;
+    step.input_artifacts;
 
   logMessage(payments, {
     task_id: step.task_id,
@@ -428,8 +408,8 @@ export async function handleCallImagesGenerator(step: any, payments: any) {
   ): Promise<any> {
     const taskData = {
       name: step.name,
-      query: subject.imagePrompt,
-      additional_params: [{ inference_type: "text2image" }],
+      input_query: subject.imagePrompt,
+      input_artifacts: [{ inference_type: "text2image" }],
     };
     return retryOperation(
       () =>
@@ -543,8 +523,8 @@ async function createVideoTaskForPrompt(
   // Build task data.
   const taskData = {
     name: step.name,
-    query: promptObject.prompt,
-    additional_params: [
+    input_query: promptObject.prompt,
+    input_artifacts: [
       {
         inference_type: "text2video",
         images: [
@@ -615,13 +595,8 @@ export async function handleCallVideoGenerator(
   step: any,
   payments: any
 ): Promise<void> {
-  const artifactsArray = safeParse(step.input_artifacts);
-  if (!artifactsArray || artifactsArray.length === 0) {
-    logger.error("No input artifacts provided for callVideoGenerator.");
-    return;
-  }
   const [{ prompts, characters, settings, duration, ...inputArtifacts }] =
-    artifactsArray;
+    step.input_artifacts;
 
   logMessage(payments, {
     task_id: step.task_id,
@@ -803,7 +778,7 @@ async function uploadVideoToS3(
     accessKeyId: AWS_ACCESS_KEY_ID,
     secretAccessKey: AWS_SECRET_ACCESS_KEY,
   });
-  const s3Bucket = "nvm-music-video-swarm-bucket";
+  const s3Bucket = "nvm-music-video-swarm-bck";
   const s3Key = path.basename(fileName);
   const fileStream = fs.createReadStream(filePath);
   logger.info(`Uploading final video to S3: ${s3Bucket}/${s3Key}`);
@@ -813,6 +788,7 @@ async function uploadVideoToS3(
       Key: s3Key,
       Body: fileStream,
       ContentType: "video/mp4",
+      ACL: "public-read",
     })
     .promise();
   logger.info(`Final video uploaded to S3: ${uploadResult.Location}`);
@@ -832,9 +808,8 @@ export async function handleCompileVideo(
   payments: any
 ): Promise<void> {
   try {
-    const [{ generatedVideos, duration, songUrl, title }] = safeParse(
-      step.input_artifacts
-    );
+    const [{ generatedVideos, duration, songUrl, title }] =
+      step.input_artifacts;
     logMessage(payments, {
       task_id: step.task_id,
       level: "info",

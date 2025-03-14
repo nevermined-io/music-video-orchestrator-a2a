@@ -30,12 +30,17 @@ export async function getVideoDuration(videoUrl: string): Promise<number> {
 export function hasSongMetadata(step: any): boolean {
   if (!step.input_artifacts) return false;
   try {
-    const artifacts = JSON.parse(step.input_artifacts);
-    if (Array.isArray(artifacts) && artifacts[0]) {
-      return !!(artifacts[0].lyrics && artifacts[0].title && artifacts[0].tags);
+    if (Array.isArray(step.input_artifacts) && step.input_artifacts[0]) {
+      return !!(
+        step.input_artifacts[0].lyrics &&
+        step.input_artifacts[0].title &&
+        step.input_artifacts[0].tags
+      );
     }
   } catch {
-    logger.warn("Could not parse input_artifacts as JSON");
+    logger.error(
+      `Could not parse input_artifacts as JSON: ${step.input_artifacts}`
+    );
   }
   return false;
 }

@@ -27,9 +27,8 @@ export async function validateSongGenerationTask(
     accessConfig
   );
 
-  const [{ title, tags, lyrics, songUrl, duration }] = JSON.parse(
-    taskResult.data.task.output_artifacts || "[]"
-  );
+  const [{ title, tags, lyrics, songUrl, duration }] =
+    taskResult.data.task.output_artifacts;
   const idea = parentStep.input_query;
 
   const result = await payments.query.updateStep(parentStep.did, {
@@ -78,12 +77,9 @@ export async function validateMusicScriptTask(
   if (taskData.task.task_status !== AgentExecutionStatus.Completed) {
     return;
   }
-  const [{ transformedScenes, characters, settings }] = JSON.parse(
-    taskData.task.output_artifacts || "[]"
-  );
-  const { tags, lyrics, duration, songUrl, title } = JSON.parse(
-    parentStep.input_artifacts || "[]"
-  );
+  const [{ transformedScenes, characters, settings }] =
+    taskData.task.output_artifacts;
+  const { tags, lyrics, duration, songUrl, title } = parentStep.input_artifacts;
 
   const result = await payments.query.updateStep(parentStep.did, {
     ...parentStep,
@@ -140,7 +136,7 @@ export async function validateImageGenerationTask(
     taskId,
     accessConfig
   );
-  const url = JSON.parse(taskResult.data.task.output_artifacts)[0];
+  const url = taskResult.data.task.output_artifacts[0];
 
   return {
     id,
@@ -173,7 +169,7 @@ export async function validateVideoGenerationTask(
     taskId,
     accessConfig
   );
-  const artifacts = JSON.parse(taskResult.data.task.output_artifacts || "[]");
+  const artifacts = taskResult.data.task.output_artifacts;
 
   return artifacts[0] ?? null;
 }
