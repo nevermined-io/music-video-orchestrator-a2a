@@ -8,6 +8,7 @@ import ffmpeg from "fluent-ffmpeg";
  * @returns {Promise<number>} - Resolves with the video duration in seconds.
  */
 export async function getVideoDuration(videoUrl: string): Promise<number> {
+  if (videoUrl === "") return 0;
   return new Promise((resolve, reject) => {
     ffmpeg.ffprobe(videoUrl, (err, metadata) => {
       if (err) {

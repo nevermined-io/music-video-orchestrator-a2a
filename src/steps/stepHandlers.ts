@@ -584,6 +584,7 @@ async function createVideoTaskForPrompt(
       });
   });
 }
+
 /**
  * Handles video generation tasks for multiple prompts.
  *
@@ -616,47 +617,67 @@ export async function handleCallVideoGenerator(
     VIDEO_GENERATOR_DID
   );
 
-  // Use retryOperation to handle retries.
-  const videoTaskPromises = prompts.map((promptObject: any) =>
-    retryOperation(
-      () =>
-        createVideoTaskForPrompt(
-          promptObject,
-          settings,
-          characters,
-          accessConfig,
-          payments,
-          step
-        ),
-      2
-    )
-  );
+  // Use retryOperation to handle retries for each prompt
+  const videoTaskPromises = prompts.map(async (promptObject: any) => {
+    try {
+      return await retryOperation(
+        () =>
+          createVideoTaskForPrompt(
+            promptObject,
+            settings,
+            characters,
+            accessConfig,
+            payments,
+            step
+          ),
+        2
+      );
+    } catch (error) {
+      // Log the error but don't fail the entire step
+      logger.error(
+        `Video generation failed for prompt "${promptObject.prompt}" after all retries: ${error}`
+      );
+      return null;
+    }
+  });
 
   try {
     const results = await Promise.all(videoTaskPromises);
 
+    // Filter out failed attempts and count them
+    const successfulVideos = results.filter(
+      (result): result is string => result !== null
+    );
+    const failedCount = results.length - successfulVideos.length;
+
+    if (failedCount > 3) {
+      throw new Error(
+        `Too many video generation failures: ${failedCount} videos failed after retries`
+      );
+    }
+
     logMessage(payments, {
       task_id: step.task_id,
       level: "info",
-      message: `All video generation tasks completed successfully:`,
+      message: `Video generation completed. Successfully generated ${successfulVideos.length} videos, ${failedCount} failed.`,
     });
 
     await payments.query.updateStep(step.did, {
       ...step,
       step_status: AgentExecutionStatus.Completed,
-      output: "All video generation tasks completed",
+      output: `Video generation completed with ${successfulVideos.length} successful videos`,
       output_artifacts: [
-        { ...inputArtifacts, duration, generatedVideos: results },
+        { ...inputArtifacts, duration, generatedVideos: successfulVideos },
       ],
     });
   } catch (error: any) {
     logger.error(
-      `Video generation failed: ${error.message || error}. Aborting task`
+      `Video generation step failed: ${error.message || error}. Aborting task`
     );
     await updateStepFailure(
       step,
       payments,
-      `Video generation failed: ${error.message || error}`
+      `Video generation step failed: ${error.message || error}`
     );
   }
 }
