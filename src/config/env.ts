@@ -63,11 +63,10 @@ export const MUSIC_SCRIPT_GENERATOR_PLAN_DID =
 export const VIDEO_GENERATOR_PLAN_DID = process.env.VIDEO_GENERATOR_PLAN_DID!;
 
 /********************/
-/*        AWS       */
+/*   PINATA       */
 /********************/
-export const AWS_REGION = process.env.AWS_REGION!;
-export const AWS_ACCESS_KEY_ID = process.env.AWS_ACCESS_KEY_ID!;
-export const AWS_SECRET_ACCESS_KEY = process.env.AWS_SECRET_ACCESS_KEY!;
+export const PINATA_API_KEY = process.env.PINATA_API_KEY!;
+export const PINATA_API_SECRET = process.env.PINATA_API_SECRET!;
 
 /*******************/
 /*   BLOCKCHAIN    */

@@ -1,11 +1,11 @@
-import fs from "fs";
-import path from "path";
-import { S3 } from "aws-sdk";
 import ffmpeg from "fluent-ffmpeg";
+import path from "path";
+import fs from "fs";
 import { logger } from "../logger/logger";
 import { logMessage } from "../utils/logMessage";
 import { hasSongMetadata, getVideoDuration } from "../utils/utils";
 import { AgentExecutionStatus, generateStepId } from "@nevermined-io/payments";
+import { uploadVideoToIPFS } from "../utils/uploadVideoToIPFS";
 
 import {
   MUSIC_SCRIPT_GENERATOR_DID,
@@ -14,9 +14,6 @@ import {
   SONG_GENERATOR_PLAN_DID,
   MUSIC_SCRIPT_GENERATOR_PLAN_DID,
   VIDEO_GENERATOR_PLAN_DID,
-  AWS_REGION,
-  AWS_ACCESS_KEY_ID,
-  AWS_SECRET_ACCESS_KEY,
 } from "../config/env";
 
 import { ensureSufficientBalance } from "../payments/ensureBalance";
@@ -785,40 +782,8 @@ async function addAudioToVideo(
 }
 
 /**
- * Uploads a video file to S3 and returns its public URL.
- *
- * @param filePath - The local file path of the video.
- * @returns {Promise<string>} - The URL of the uploaded video.
- */
-async function uploadVideoToS3(
-  filePath: string,
-  fileName: string
-): Promise<string> {
-  const s3 = new S3({
-    region: AWS_REGION,
-    accessKeyId: AWS_ACCESS_KEY_ID,
-    secretAccessKey: AWS_SECRET_ACCESS_KEY,
-  });
-  const s3Bucket = "nvm-music-video-swarm-bck";
-  const s3Key = path.basename(fileName);
-  const fileStream = fs.createReadStream(filePath);
-  logger.info(`Uploading final video to S3: ${s3Bucket}/${s3Key}`);
-  const uploadResult = await s3
-    .upload({
-      Bucket: s3Bucket,
-      Key: s3Key,
-      Body: fileStream,
-      ContentType: "video/mp4",
-      ACL: "public-read",
-    })
-    .promise();
-  logger.info(`Final video uploaded to S3: ${uploadResult.Location}`);
-  return uploadResult.Location;
-}
-
-/**
  * Handles the "compileVideo" step by concatenating video clips,
- * overlaying audio, uploading the final output to S3, and updating the step.
+ * overlaying audio, uploading the final output to IPFS, and updating the step.
  *
  * @param step - The current step data.
  * @param payments - The Payments instance.
@@ -873,10 +838,10 @@ export async function handleCompileVideo(
     logMessage(payments, {
       task_id: step.task_id,
       level: "info",
-      message: `Compilation completed for "${title}". Uploading to S3...`,
+      message: `Compilation completed for "${title}". Uploading to IPFS...`,
     });
 
-    const finalVideoUrl = await uploadVideoToS3(
+    const finalVideoUrl = await uploadVideoToIPFS(
       finalOutputPath,
       convertedTitle
     );

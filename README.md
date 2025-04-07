@@ -3,26 +3,26 @@
 Music Video Orchestrator Agent using Nevermined's Payments API (TypeScript)
 ===========================================================================
 
-> A TypeScript-based orchestrator that generates complete music videos from a user prompt, leveraging the **Nevermined Payments API**. It coordinates multiple sub-agents (song generator, script generator, image/video generator), handles token swaps when necessary, and compiles everything into a final MP4 video.
+> A TypeScript-based orchestrator that generates complete music videos from a user prompt, leveraging the **Nevermined Payments API**. It coordinates multiple sub-agents (song generator, script generator, image/video generator), handles token swaps when necessary, and compiles everything into a final MP4 video uploaded to IPFS via Pinata.
 
 * * *
 
 Description
 -----------
 
-This project demonstrates how to build an **Orchestrator** that receives a creative brief for a music video (e.g., “A cyberpunk rap anthem about AI collaboration”), then proceeds through several steps to:
+This project demonstrates how to build an **Orchestrator** that receives a creative brief for a music video (e.g., "A cyberpunk rap anthem about AI collaboration"), then proceeds through several steps to:
 
 1.  **Generate a Song** (lyrics + audio track)
 2.  **Generate a Script** (scenes, camera movements, character descriptions, settings)
 3.  **Create Images** for each character and setting
 4.  **Produce Short Video Clips** based on the generated prompts
 5.  **Compile** the clips and audio track into a final music video (MP4)
-6.  **Return** the final S3 URL for the video to the user
+6.  **Return** the final IPFS URL for the video to the user
 
 While orchestrating these tasks, the system also uses **Nevermined** to:
 
 *   Validate **payment plans** for each agent (Song, Script, Video, etc.)
-*   Automatically **swap** tokens if an agent requires payment in a currency different from the Orchestrator’s base token
+*   Automatically **swap** tokens if an agent requires payment in a currency different from the Orchestrator's base token
 *   **Log** events and results both locally and via the **Nevermined Payments** service
 
 * * *
@@ -45,7 +45,7 @@ This **Music Video Orchestrator Agent** is part of a larger ecosystem of AI-driv
 **Workflow Example**:
 
 ```
-[ User Prompt ] --> [Music Orchestrator] --> [Song Generation] --> [Script Generation] --> [Image/Video Generation] --> [Final Compilation]
+[ User Prompt ] --> [Music Orchestrator] --> [Song Generation] --> [Script Generation] --> [Image/Video Generation] --> [Final Compilation] --> [IPFS Upload]
 ```
 
 * * *
@@ -69,6 +69,7 @@ Table of Contents
 *   **Node.js** (>= 14 recommended)
 *   **TypeScript** (project built on version 4.x or later)
 *   Valid **Nevermined** credentials (API key, plan DIDs, agent DIDs, etc.)
+*   **Pinata** account with API key and secret for IPFS uploads
 *   Optional: A running **Ethereum node** or an RPC endpoint for swaps (if using Uniswap functionality)
 
 ### Installation
@@ -102,7 +103,7 @@ Rename `.env.example` to `.env` and configure all relevant environment variables
 NVM_API_KEY=yourNeverminedApiKey
 NVM_ENVIRONMENT=testing|base|staging|production
 
-# Orchestrator’s DID
+# Orchestrator's DID
 AGENT_DID=did:nv:1111aaaa-bbbb-cccc-dddd-orchestrator
 
 # Agent DIDs
@@ -116,10 +117,9 @@ SONG_GENERATOR_PLAN_DID=did:nv:8888aaaa-song-plan
 MUSIC_SCRIPT_GENERATOR_PLAN_DID=did:nv:9999aaaa-script-plan
 VIDEO_GENERATOR_PLAN_DID=did:nv:aaaa1111-video-plan
 
-# AWS Config for uploading final video
-AWS_REGION=us-east-1
-AWS_ACCESS_KEY_ID=xxx
-AWS_SECRET_ACCESS_KEY=xxx
+# Pinata Config for IPFS uploads
+PINATA_API_KEY=your_pinata_api_key
+PINATA_API_SECRET=your_pinata_api_secret
 
 # Blockchain / Uniswap
 RPC_URL=https://...
@@ -128,7 +128,7 @@ UNISWAP_V2_ROUTER_ADDRESS=0xUniswapRouter
 UNISWAP_V2_FACTORY_ADDRESS=0xUniswapFactory
 ```
 
-Each of these variables controls a part of the Orchestrator’s workflow, including Nevermined environment details, agent and plan DIDs, AWS credentials for S3 uploads, and the blockchain config for token swaps.
+Each of these variables controls a part of the Orchestrator's workflow, including Nevermined environment details, agent and plan DIDs, Pinata credentials for IPFS uploads, and the blockchain config for token swaps.
 
 ### Project Structure
 
@@ -147,6 +147,7 @@ Each of these variables controls a part of the Orchestrator’s workflow, includ
 │   └── taskValidation.ts    # Validates outputs of each task
 ├── utils
 │   ├── logMessage.ts        # Log utility (local + remote)
+│   ├── uploadVideoToIPFS.ts # Uploads compiled video to IPFS using Pinata
 │   └── utils.ts             # Helpers (e.g., FFmpeg usage)
 ├── main.ts                  # Entry point subscribing to "step-updated" events
 ├── package.json
@@ -158,9 +159,10 @@ Each of these variables controls a part of the Orchestrator’s workflow, includ
 
 *   **`main.ts`**: Initializes the Orchestrator, listens for relevant events, and calls `processSteps()`.
 *   **`stepHandlers.ts`**: Defines a handler function for each phase of the pipeline (`callSongGenerator`, `generateMusicScript`, `callImagesGenerator`, `callVideoGenerator`, `compileVideo`, etc.).
-*   **`payments/blockchain.ts`**: Performs the actual Uniswap V2 swaps if an agent charges in a token we don’t currently hold.
-*   **`payments/ensureBalance.ts`**: A utility that checks if we have enough credits for a plan, or triggers a purchase or swap if we’re short.
-*   **`steps/taskValidation.ts`**: Once a sub-task (e.g., “Generate Song”) completes, we parse its output artifacts (like MP3 URL), ensuring correctness.
+*   **`payments/blockchain.ts`**: Performs the actual Uniswap V2 swaps if an agent charges in a token we don't currently hold.
+*   **`payments/ensureBalance.ts`**: A utility that checks if we have enough credits for a plan, or triggers a purchase or swap if we're short.
+*   **`steps/taskValidation.ts`**: Once a sub-task (e.g., "Generate Song") completes, we parse its output artifacts (like MP3 URL), ensuring correctness.
+*   **`utils/uploadVideoToIPFS.ts`**: Handles uploading the final compiled video to IPFS using Pinata's API.
 
 ### Architecture and Workflow
 
@@ -184,15 +186,15 @@ Each of these variables controls a part of the Orchestrator’s workflow, includ
 4.  **Images** (`callImagesGenerator`)
     
     *   Each character and setting from the script is given to the Image/Video Generator.
-    *   The system concurrently requests images for each subject, storing URLs in the step’s artifacts.
+    *   The system concurrently requests images for each subject, storing URLs in the step's artifacts.
 5.  **Video** (`callVideoGenerator`)
     
     *   For each scene prompt, the system requests a short video clip.
     *   Again, it checks or swaps tokens if the plan is short on credits.
 6.  **Compilation** (`compileVideo`)
     
-    *   Merges all video clips with FFmpeg, applies the audio track, and uploads the final `.mp4` to S3.
-    *   Returns the final video URL as the completion output.
+    *   Merges all video clips with FFmpeg, applies the audio track, and uploads the final `.mp4` to IPFS via Pinata.
+    *   Returns the final video URL (IPFS gateway URL) as the completion output.
 
 ### Usage
 
@@ -209,13 +211,14 @@ The Orchestrator will:
 2.  Subscribe to any `step-updated` events directed to your `AGENT_DID`.
 3.  Whenever a new workflow step is triggered for your agent, it will route it to the correct function in `stepHandlers.ts`.
 4.  **Automatically** handle token swaps, sub-task creation, and logging.
-5.  **Produce** and store the final compiled music video in S3.
+5.  **Produce** and store the final compiled music video in IPFS via Pinata.
 
 ### How It Works Internally
 
-*   **Nevermined Payment Plans**: Each agent has its own DID and plan. The orchestrator checks if there’s enough balance before creating a sub-task for that agent. If not, it orders more credits—potentially swapping tokens to match what the agent requires.
+*   **Nevermined Payment Plans**: Each agent has its own DID and plan. The orchestrator checks if there's enough balance before creating a sub-task for that agent. If not, it orders more credits—potentially swapping tokens to match what the agent requires.
 *   **Concurrent Tasks**: For image or video generation, the orchestrator can create tasks in parallel. This is especially handy when generating multiple scenes at once.
-*   **FFmpeg Merging**: The final step stitches together all video clips (scene by scene) and lays the audio track on top. Temporary files reside in `/tmp` or a similar location; afterward, the result is uploaded to AWS S3.
+*   **FFmpeg Merging**: The final step stitches together all video clips (scene by scene) and lays the audio track on top. Temporary files reside in `/tmp` or a similar location; afterward, the result is uploaded to IPFS via Pinata.
+*   **IPFS Storage**: The final video is uploaded to IPFS using Pinata's API, which provides a gateway URL for easy access to the content.
 *   **Logging**: The system logs each action both locally (via `pino`) and remotely (via `payments.query.logTask()`), making it easy to see errors, transaction hashes, or final file URLs.
 
 * * *
