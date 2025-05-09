@@ -1,79 +1,43 @@
+/**
+ * @file env.ts
+ * @description Environment configuration and validation
+ */
+
 import dotenv from "dotenv";
 
 dotenv.config();
 
-/**
- * Nevermined API key to authenticate against the Payments API.
- */
-export const NVM_API_KEY = process.env.NVM_API_KEY!;
+export const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
+
+export interface EnvConfig {
+  PORT: number;
+  HOST: string;
+  NODE_ENV: string;
+  LOG_LEVEL: string;
+  OPENAI_API_KEY: string;
+  MAX_CONCURRENT_TASKS: number;
+  MAX_RETRIES: number;
+  RETRY_DELAY: number;
+  TASK_TIMEOUT: number;
+}
 
 /**
- * Nevermined environment: 'testing', 'staging', or 'production'.
+ * @constant defaultConfig
+ * @description Default configuration values
  */
-export const NVM_ENVIRONMENT = process.env.NVM_ENVIRONMENT || "testing";
-
-/********************/
-/*   AGENT DIDs     */
-/********************/
+export const defaultConfig: Partial<EnvConfig> = {
+  PORT: 3000,
+  HOST: "localhost",
+  NODE_ENV: "development",
+  LOG_LEVEL: "info",
+  MAX_CONCURRENT_TASKS: 1,
+  MAX_RETRIES: 3,
+  RETRY_DELAY: 1000,
+  TASK_TIMEOUT: 300000, // 5 minutes
+};
 
 /**
- * DID of this Orchestrator Agent.
+ * @constant requiredEnvVars
+ * @description List of required environment variables
  */
-export const AGENT_DID = process.env.AGENT_DID!;
-
-/**
- * DID of the sub-agent that generates music video scripts.
- */
-export const MUSIC_SCRIPT_GENERATOR_DID =
-  process.env.MUSIC_SCRIPT_GENERATOR_DID!;
-
-/**
- * DID of the sub-agent that generates songs.
- */
-export const SONG_GENERATOR_DID = process.env.SONG_GENERATOR_DID!;
-
-/**
- * DID of the sub-agent that generates video clips.
- */
-export const VIDEO_GENERATOR_DID = process.env.VIDEO_GENERATOR_DID!;
-
-/********************/
-/*   PLAN DIDs      */
-/********************/
-
-/**
- * DID of our own payment plan.
- */
-export const PLAN_DID = process.env.PLAN_DID!;
-
-/**
- * DID of the song generator payment plan.
- */
-export const SONG_GENERATOR_PLAN_DID = process.env.SONG_GENERATOR_PLAN_DID!;
-
-/**
- * DID of the music video script payment plan.
- */
-export const MUSIC_SCRIPT_GENERATOR_PLAN_DID =
-  process.env.MUSIC_SCRIPT_GENERATOR_PLAN_DID!;
-
-/**
- * DID of the payment plan used by the video generator (if separate).
- */
-export const VIDEO_GENERATOR_PLAN_DID = process.env.VIDEO_GENERATOR_PLAN_DID!;
-
-/********************/
-/*   PINATA       */
-/********************/
-export const PINATA_API_KEY = process.env.PINATA_API_KEY!;
-export const PINATA_API_SECRET = process.env.PINATA_API_SECRET!;
-
-/*******************/
-/*   BLOCKCHAIN    */
-/*******************/
-export const RPC_URL = process.env.RPC_URL!;
-export const PRIVATE_KEY = process.env.PRIVATE_KEY!;
-export const NETWORK_ID = parseInt(process.env.NETWORK_ID!);
-export const UNISWAP_V2_ROUTER_ADDRESS = process.env.UNISWAP_V2_ROUTER_ADDRESS!;
-export const UNISWAP_V2_FACTORY_ADDRESS =
-  process.env.UNISWAP_V2_FACTORY_ADDRESS!;
+export const requiredEnvVars: (keyof EnvConfig)[] = ["OPENAI_API_KEY"];
