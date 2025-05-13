@@ -4,7 +4,11 @@
  */
 
 import { fetchAgentCard, sendTask } from "./agents/a2aAgentClient";
-import { llmMapAgentParams, llmExtractImageUrl } from "./utils/llmA2aExtractor";
+import {
+  llmMapAgentParams,
+  llmExtractImageUrl,
+  llmExtractVideoUrl,
+} from "./utils/llmA2aExtractor";
 import {
   extractCharacters,
   extractSettings,
@@ -106,16 +110,16 @@ export async function startOrchestration(input: {
   );
 
   // Step 10: Generate video clips for each scene
-  // Logger.info("[startOrchestration] Generating video clips for each scene");
-  // const videoClips = await generateVideoClips(
-  //   mediaAgentCard,
-  //   scenes,
-  //   generatedImages,
-  //   songResult
-  // );
-  // Logger.info(
-  //   `[startOrchestration] Generated ${videoClips.length} video clips`
-  // );
+  Logger.info("[startOrchestration] Generating video clips for each scene");
+  const videoClips = await generateVideoClips(
+    mediaAgentCard,
+    scenes,
+    generatedImages,
+    songResult
+  );
+  Logger.info(
+    `[startOrchestration] Generated ${videoClips.length} video clips`
+  );
 
   // Return the complete result with extracted data and generated media
   return {
@@ -307,7 +311,7 @@ export async function generateVideoClips(
 ): Promise<any[]> {
   const videoClips: any[] = [];
 
-  for (const scene of scenes) {
+  for (const scene of [scenes[0]]) {
     try {
       // Identify which characters are in this scene
       const sceneCharacters = scene.characters || [];
@@ -338,14 +342,11 @@ export async function generateVideoClips(
           settingImage,
           settingName,
           characterImages: sceneCharacterImages,
-          songInfo: {
-            title: songResult?.title || "",
-            audioUrl: songResult?.audioUrl || "",
-            duration: songResult?.duration || 0,
-          },
+          songInfo: songResult.status.artifacts || {},
           // Additional video parameters
-          duration: scene.duration || 5, // default 5 seconds per scene if not specified
-          description: scene.description || "",
+          //duration: scene.duration || 5, // default 5 seconds per scene if not specified
+          duration: 5,
+          technicalDetails: scene.technicalDetails || {},
         },
       });
 
@@ -362,10 +363,16 @@ export async function generateVideoClips(
       );
 
       // Extract video URL and details from result
-      let videoUrl = "";
+      let videoUrl = await llmExtractVideoUrl(mediaAgentCard, result);
       let videoDetails: any = {};
 
-      if (result && result.artifacts && result.artifacts.length > 0) {
+      if (
+        !videoUrl &&
+        result &&
+        result.artifacts &&
+        result.artifacts.length > 0
+      ) {
+        // Fallback: intentar extraer detalles adicionales si la URL no se obtuvo
         for (const artifact of result.artifacts) {
           for (const part of artifact.parts || []) {
             if (part.type === "text" && part.text) {
@@ -377,7 +384,6 @@ export async function generateVideoClips(
                   break;
                 }
               } catch (e) {
-                // Not JSON or doesn't contain videoUrl
                 continue;
               }
             } else if (part.type === "file" && part.file && part.file.uri) {

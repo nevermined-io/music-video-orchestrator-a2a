@@ -116,6 +116,25 @@ export async function llmExtractImageUrl(
 }
 
 /**
+ * Uses an LLM to extract the video URL from an agent result, guided by the agent's AgentCard.
+ * @param {any} agentCard - The AgentCard describing the agent's output structure.
+ * @param {any} agentResult - The actual result from the agent (output of sendTask).
+ * @returns {Promise<string>} - The extracted video URL, or an empty string if not found.
+ */
+export async function llmExtractVideoUrl(
+  agentCard: any,
+  agentResult: any
+): Promise<string> {
+  const extractionGoal = `Extract ONLY the direct URL of the generated video from the agent result. If there is more than one video, return the first one. If no video URL is found, return an empty string. The output must be a JSON object: { "videoUrl": "..." }`;
+  const result = await llmExtractAgentData(
+    agentCard,
+    agentResult,
+    extractionGoal
+  );
+  return result?.videoUrl || "";
+}
+
+/**
  * Maps available data to the parameters required by an agent's skill, ensuring the main user input is always placed in the standard A2A `message` field.
  *
  * Many agents define their main input parameter with different names (e.g., "prompt", "idea", "input", "message").

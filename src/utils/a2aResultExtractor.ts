@@ -31,8 +31,20 @@ export async function extractCharacters(
   agentCard: any,
   agentResult: any
 ): Promise<any[]> {
-  const goal =
-    "Extract all characters from the agent result, including name, description, and any visual prompt or details for image generation. Return as an array of objects.";
+  const goal = `
+  Extract all characters from the agent result, including:
+    - name (as used in the script and scene descriptions)
+    - description (physical and personality details)
+    - any visual prompt or details for image generation
+  
+  IMPORTANT:
+  - Only include each character once, even if they appear in multiple scenes.
+  - The name must match exactly how it appears in the script or character list.
+  - If a character is referenced in any scene, they must be included in the output.
+  - If the agent result provides a character list, use that as the authoritative source for names and details.
+  
+  Return as an array of character objects.
+  `;
   return llmExtractAgentData(agentCard, agentResult, goal);
 }
 
@@ -46,8 +58,17 @@ export async function extractSettings(
   agentCard: any,
   agentResult: any
 ): Promise<any[]> {
-  const goal =
-    "Extract all unique settings and locations from the agent result, including name, description, and any visual prompt for background image generation. Return as an array of objects.";
+  const goal = `
+    Extract all unique settings (locations) from the agent result. 
+    - For each setting, include: 
+      - name (the identifier or name of the location as used in the script or scene list)
+      - description (detailed description of the location)
+      - any visual prompt or details for background image generation
+    - If multiple scenes share the same location, extract the location only once.
+    - Do NOT extract one setting per scene; group scenes that logically occur in the same place and return only one object for each unique location.
+    - The name must match the identifier used in the script for that location.
+    Return as an array of unique setting/location objects.
+    `;
   return llmExtractAgentData(agentCard, agentResult, goal);
 }
 
@@ -61,17 +82,22 @@ export async function extractScenes(
   agentCard: any,
   agentResult: any
 ): Promise<any[]> {
-  const goal = `Extract all scenes from the agent result, including:
-  - Scene number/identifier
-  - Scene description
-  - Characters present in the scene
-  - Setting/location where the scene takes place
-  - Camera movement/shot type if available
-  - Visual prompt suitable for AI video generation
-  - Duration or timing information if available
-  - Any other technical details helpful for video creation
-
-Return as an array of scene objects, with each scene containing at minimum: sceneNumber, description, prompt, characters, setting, and duration (if available).`;
+  const goal = `
+  Extract all scenes from the agent result, including:
+    - Scene number/identifier
+    - Scene description or prompt
+    - Characters present in the scene (as an array of character names)
+      - IMPORTANT: The characters array must be filled by matching the names mentioned in each scene's description with the names in the character list provided in the agent result.
+      - Do NOT leave the characters array empty. Every scene must have at least one character, and the names must match exactly those in the character list.
+      - If a character is referenced in the scene description (even indirectly or by role), include them using the exact name from the character list.
+    - Setting/location identifier where the scene takes place. This must match exactly one of the settings in the settings array (do not invent new settings).
+    - Camera movement/shot type if available
+    - Visual prompt suitable for AI video generation
+    - Duration or timing information if available
+    - Any other technical details helpful for video creation
+  
+  Return as an array of scene objects, with each scene containing at minimum: sceneNumber, description or prompt, characters (non-empty, matching the character list), setting (referencing the correct setting identifier), and duration (if available).
+  `;
 
   return llmExtractAgentData(agentCard, agentResult, goal);
 }
