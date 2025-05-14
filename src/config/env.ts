@@ -8,6 +8,8 @@ import dotenv from "dotenv";
 dotenv.config();
 
 export const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
+export const PINATA_API_KEY = process.env.PINATA_API_KEY!;
+export const PINATA_API_SECRET = process.env.PINATA_API_SECRET!;
 
 export interface EnvConfig {
   PORT: number;
@@ -19,6 +21,8 @@ export interface EnvConfig {
   MAX_RETRIES: number;
   RETRY_DELAY: number;
   TASK_TIMEOUT: number;
+  PINATA_API_KEY: string;
+  PINATA_API_SECRET: string;
 }
 
 /**
@@ -34,10 +38,16 @@ export const defaultConfig: Partial<EnvConfig> = {
   MAX_RETRIES: 3,
   RETRY_DELAY: 1000,
   TASK_TIMEOUT: 300000, // 5 minutes
+  PINATA_API_KEY: "",
+  PINATA_API_SECRET: "",
 };
 
 /**
  * @constant requiredEnvVars
  * @description List of required environment variables
  */
-export const requiredEnvVars: (keyof EnvConfig)[] = ["OPENAI_API_KEY"];
+export const requiredEnvVars: (keyof EnvConfig)[] = [
+  "OPENAI_API_KEY",
+  "PINATA_API_KEY",
+  "PINATA_API_SECRET",
+];

@@ -135,6 +135,28 @@ export async function llmExtractVideoUrl(
 }
 
 /**
+ * Uses an LLM to extract the song URL and title from a song agent result, guided by the agent's AgentCard.
+ * @param {any} agentCard - The AgentCard describing the agent's output structure.
+ * @param {any} agentResult - The actual result from the agent (output of sendTask).
+ * @returns {Promise<{ songUrl: string, title: string }>} - The extracted song URL and title, or empty strings if not found.
+ */
+export async function llmExtractSongInfo(
+  agentCard: any,
+  agentResult: any
+): Promise<{ songUrl: string; title: string }> {
+  const extractionGoal = `Extract ONLY the direct URL of the generated song (audio) and the title from the agent result. The output must be a JSON object: { "songUrl": "...", "title": "..." }`;
+  const result = await llmExtractAgentData(
+    agentCard,
+    agentResult,
+    extractionGoal
+  );
+  return {
+    songUrl: result?.songUrl || "",
+    title: result?.title || "",
+  };
+}
+
+/**
  * Maps available data to the parameters required by an agent's skill, ensuring the main user input is always placed in the standard A2A `message` field.
  *
  * Many agents define their main input parameter with different names (e.g., "prompt", "idea", "input", "message").
