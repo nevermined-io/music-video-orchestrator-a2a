@@ -5,6 +5,7 @@
 
 import { Response } from "express";
 import { Task, TaskState } from "../models/task";
+import { A2AEventType } from "../models/a2aEventType";
 
 /**
  * @interface StreamingConnection
@@ -13,16 +14,6 @@ import { Task, TaskState } from "../models/task";
 interface StreamingConnection {
   response: Response;
   taskId: string;
-}
-
-/**
- * @enum EventType
- * @description Types of events that can be sent via SSE
- */
-enum EventType {
-  STATUS_UPDATE = "status_update",
-  ARTIFACT = "artifact",
-  ERROR = "error",
 }
 
 /**
@@ -89,11 +80,15 @@ export class StreamingService {
     };
     connections.forEach((connection) => {
       connection.response.write(
-        `event: status_update\ndata: ${JSON.stringify(event)}\n\n`
+        `event: ${A2AEventType.STATUS_UPDATE}\ndata: ${JSON.stringify(
+          event
+        )}\n\n`
       );
       if (isFinal) {
         connection.response.write(
-          `event: completion\ndata: ${JSON.stringify(event)}\n\n`
+          `event: ${A2AEventType.COMPLETION}\ndata: ${JSON.stringify(
+            event
+          )}\n\n`
         );
       }
     });
@@ -117,7 +112,7 @@ export class StreamingService {
     };
     connections.forEach((connection) => {
       connection.response.write(
-        `event: error\ndata: ${JSON.stringify(event)}\n\n`
+        `event: ${A2AEventType.ERROR}\ndata: ${JSON.stringify(event)}\n\n`
       );
     });
   }

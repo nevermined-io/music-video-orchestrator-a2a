@@ -4,24 +4,14 @@
  */
 
 import { Response } from "express";
-
-/**
- * @enum PushNotificationEventType
- * @description Types of push notification events
- */
-export enum PushNotificationEventType {
-  STATUS_UPDATE = "status_update",
-  ARTIFACT_CREATED = "artifact",
-  ERROR = "error",
-  COMPLETION = "completion",
-}
+import { A2AEventType } from "../models/a2aEventType";
 
 /**
  * @interface PushNotificationEvent
  * @description Structure of a push notification event
  */
 export interface PushNotificationEvent {
-  type: PushNotificationEventType;
+  type: A2AEventType;
   taskId: string;
   timestamp: string;
   data: any;
@@ -33,7 +23,7 @@ export interface PushNotificationEvent {
  */
 export interface PushNotificationConfig {
   taskId: string;
-  eventTypes: PushNotificationEventType[];
+  eventTypes: A2AEventType[];
   webhookUrl?: string;
 }
 
@@ -56,10 +46,10 @@ export class PushNotificationService {
   ): void {
     if (!config.eventTypes || config.eventTypes.length === 0) {
       config.eventTypes = [
-        PushNotificationEventType.STATUS_UPDATE,
-        PushNotificationEventType.ARTIFACT_CREATED,
-        PushNotificationEventType.ERROR,
-        PushNotificationEventType.COMPLETION,
+        A2AEventType.STATUS_UPDATE,
+        A2AEventType.ARTIFACT,
+        A2AEventType.ERROR,
+        A2AEventType.COMPLETION,
       ];
     }
     this.subscriptions.set(taskId, config);
@@ -73,7 +63,7 @@ export class PushNotificationService {
       Connection: "keep-alive",
     });
     res.write(
-      `event: status_update\ndata: ${JSON.stringify({
+      `event: ${A2AEventType.STATUS_UPDATE}\ndata: ${JSON.stringify({
         status: "connected",
       })}\n\n`
     );
@@ -92,10 +82,10 @@ export class PushNotificationService {
   ): Promise<void> {
     if (!config.eventTypes || config.eventTypes.length === 0) {
       config.eventTypes = [
-        PushNotificationEventType.STATUS_UPDATE,
-        PushNotificationEventType.ARTIFACT_CREATED,
-        PushNotificationEventType.ERROR,
-        PushNotificationEventType.COMPLETION,
+        A2AEventType.STATUS_UPDATE,
+        A2AEventType.ARTIFACT,
+        A2AEventType.ERROR,
+        A2AEventType.COMPLETION,
       ];
     }
     this.subscriptions.set(taskId, config);
