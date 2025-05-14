@@ -2,8 +2,8 @@ import {
   llmMapAgentParams,
   llmExtractImageUrl,
   llmExtractVideoUrl,
-} from "./llmA2aExtractor";
-import { Logger } from "./logger";
+} from "../agents/llmA2aExtractor";
+import { Logger } from "../core/logger";
 import { sendTask } from "../agents/a2aAgentClient";
 
 /**
@@ -198,23 +198,32 @@ export async function generateVideoClips(
       }
 
       const settingName = scene.setting || "";
-      const settingImage = generatedImages.settings.get(settingName) || "";
+      const settingImage =
+        settingName && generatedImages.settings.has(settingName)
+          ? generatedImages.settings.get(settingName)
+          : "";
+
+      const videoPrompt =
+        scene.visualPrompt ||
+        `A cinematic shot of ${scene.description || "the scene"}`;
 
       const params = await llmMapAgentParams({
         agentCard: mediaAgentCard,
         availableData: {
-          intent: "generate_video",
-          scene: scene,
-          settingImage,
-          settingName,
+          type: "scene",
+          sceneNumber: scene.sceneNumber,
+          prompt: videoPrompt,
+          description: scene.description,
+          characters: sceneCharacters,
           characterImages: sceneCharacterImages,
+          setting: settingName,
+          settingImage,
+          intent: "generate_video",
         },
       });
 
       Logger.info(
-        `[generateVideoClips] Generating video for scene ${
-          scene.sceneNumber
-        }: ${scene.description?.substring(0, 50)}...`
+        `[generateVideoClips] Generating video for scene: ${scene.sceneNumber}`
       );
       const result = await sendTask(
         "http://localhost:8003",
@@ -223,15 +232,14 @@ export async function generateVideoClips(
       );
 
       const videoUrl = await llmExtractVideoUrl(mediaAgentCard, result);
-
       if (videoUrl) {
         Logger.info(
-          `[generateVideoClips] Successfully generated video for scene ${scene.sceneNumber}`
+          `[generateVideoClips] Successfully generated video for scene: ${scene.sceneNumber}`
         );
         return videoUrl;
       } else {
         Logger.warn(
-          `[generateVideoClips] Failed to extract video URL for scene ${scene.sceneNumber}`
+          `[generateVideoClips] Failed to extract video URL for scene: ${scene.sceneNumber}`
         );
         return null;
       }
@@ -243,9 +251,9 @@ export async function generateVideoClips(
       return null;
     }
   }
-  // TODO: Remove debug filter
-  scenes = scenes.slice(0, 1);
-  const videoUrls = await Promise.all(scenes.map(processScene));
 
-  return videoUrls.filter((url) => url !== null);
+  const videoClipResults = await Promise.all(
+    scenes.map((scene) => processScene(scene))
+  );
+  return videoClipResults.filter((url) => !!url);
 }

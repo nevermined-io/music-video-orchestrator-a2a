@@ -1,7 +1,7 @@
 /**
  * Helper utilities for extracting structured data from A2A agent results.
  * Delegates all LLM and prompt logic to llmA2aExtractor.ts.
- * @module utils/a2aResultExtractor
+ * @module agents/a2aResultExtractor
  */
 
 import { llmExtractAgentData } from "./llmA2aExtractor";

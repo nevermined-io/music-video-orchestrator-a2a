@@ -5,7 +5,7 @@
 
 import { AgentCard } from "../types/AgentCard";
 import { v4 as uuidv4 } from "uuid";
-import { Logger } from "../utils/logger";
+import { Logger } from "../core/logger";
 import http from "http";
 import https from "https";
 import { URL } from "url";

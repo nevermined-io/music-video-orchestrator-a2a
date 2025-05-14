@@ -8,15 +8,15 @@ import {
   extractCharacters,
   extractSettings,
   extractScenes,
-} from "./utils/a2aResultExtractor";
-import { Logger } from "./utils/logger";
-import { compileMusicVideo } from "./utils/videoUtils";
+} from "./agents/a2aResultExtractor";
+import { Logger } from "./core/logger";
+import { compileMusicVideo } from "./core/videoUtils";
 import {
   generateCharacterAndSettingImages,
   generateVideoClips,
-} from "./utils/mediaGeneration";
-import { generateSong, generateScript } from "./utils/orchestrationTasks";
-import { uploadVideoToIPFS } from "./utils/uploadVideoToIPFS";
+} from "./services/mediaGeneration";
+import { generateSong, generateScript } from "./services/orchestrationTasks";
+import { uploadVideoToIPFS } from "./services/uploadVideoToIPFS";
 import fs from "fs";
 
 /**

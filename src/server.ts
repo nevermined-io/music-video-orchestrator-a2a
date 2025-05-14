@@ -1,14 +1,18 @@
 /**
  * Main entry point for the Orchestrator Agent server.
- * Exposes an HTTP API to trigger the music video workflow.
+ * Exposes an HTTP API to trigger the music video workflow and A2A endpoints.
  * @module server
  */
 
 import express, { Request, Response } from "express";
 import { startOrchestration } from "./orchestrator";
+import a2aRoutes from "./routes/a2aRoutes";
 
 const app = express();
 app.use(express.json());
+
+// Mount A2A routes at root (for /tasks/* and /.well-known/agent.json)
+app.use("/", a2aRoutes);
 
 /**
  * POST /music-video

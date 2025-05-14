@@ -1,7 +1,7 @@
 /**
  * Utility for subscribing to A2A task updates via Server-Sent Events (SSE)
  * Follows the robust pattern of the external script for real-time updates.
- * @module utils/sseClient
+ * @module core/sseClient
  */
 
 import EventSource from "eventsource";

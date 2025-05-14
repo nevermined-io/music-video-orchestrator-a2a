@@ -1,4 +1,7 @@
-import { llmMapAgentParams, llmExtractSongInfo } from "./llmA2aExtractor";
+import {
+  llmMapAgentParams,
+  llmExtractSongInfo,
+} from "../agents/llmA2aExtractor";
 import { sendTask } from "../agents/a2aAgentClient";
 
 /**
