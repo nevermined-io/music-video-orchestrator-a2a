@@ -33,7 +33,7 @@ app.post("/music-video", async (req: Request, res: Response) => {
   }
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8000;
 app.listen(PORT, () => {
   console.log(`Orchestrator Agent listening on port ${PORT}`);
 });

@@ -6,17 +6,16 @@
 import { Request, Response } from "express";
 import { Task, TaskState } from "../models/task";
 import { TaskStore } from "../core/taskStore";
-import { SessionManager } from "../core/sessionManager";
 import { ErrorHandler } from "../core/errorHandler";
 import { TaskProcessor } from "../core/taskProcessor";
 import { TaskQueue } from "../core/taskQueue";
 import {
   PushNotificationService,
-  PushNotificationEventType,
   PushNotificationEvent,
 } from "../services/pushNotificationService";
 import { StreamingService } from "../services/streamingService";
 import { v4 as uuidv4 } from "uuid";
+import { A2AEventType } from "../models/a2aEventType";
 
 /**
  * @class A2AController
@@ -24,7 +23,6 @@ import { v4 as uuidv4 } from "uuid";
  */
 export class A2AController {
   private taskStore: TaskStore;
-  private sessionManager: SessionManager;
   private taskProcessor: TaskProcessor;
   private taskQueue: TaskQueue;
   private pushNotificationService: PushNotificationService;
@@ -32,7 +30,6 @@ export class A2AController {
 
   constructor() {
     this.taskStore = new TaskStore();
-    this.sessionManager = new SessionManager();
     this.taskProcessor = new TaskProcessor(this.taskStore);
     this.taskQueue = new TaskQueue(this.taskProcessor, 2);
     this.pushNotificationService = new PushNotificationService();
@@ -46,7 +43,7 @@ export class A2AController {
       ].includes(task.status.state);
       if (isFinal) {
         const completionEvent: PushNotificationEvent = {
-          type: PushNotificationEventType.COMPLETION,
+          type: A2AEventType.COMPLETION,
           taskId: task.id,
           timestamp: new Date().toISOString(),
           data: { finalStatus: task.status, artifacts: task.artifacts },
@@ -54,7 +51,7 @@ export class A2AController {
         this.pushNotificationService.notify(task.id, completionEvent);
       } else {
         const event: PushNotificationEvent = {
-          type: PushNotificationEventType.STATUS_UPDATE,
+          type: A2AEventType.STATUS_UPDATE,
           taskId: task.id,
           timestamp: new Date().toISOString(),
           data: { status: task.status, artifacts: task.artifacts },
@@ -69,7 +66,7 @@ export class A2AController {
    * @method healthCheck
    * @description Check service health
    */
-  public healthCheck = async (req: Request, res: Response): Promise<void> => {
+  public healthCheck = async (_req: Request, res: Response): Promise<void> => {
     res.json({ status: "healthy" });
   };
 
@@ -77,28 +74,35 @@ export class A2AController {
    * @method getAgentCard
    * @description Returns the agent's capabilities and metadata
    */
-  public getAgentCard = async (req: Request, res: Response): Promise<void> => {
+  public getAgentCard = async (_req: Request, res: Response): Promise<void> => {
     res.json({
-      name: "A2A Example Agent",
-      description: "A simple A2A agent example.",
-      url: "http://localhost:8001",
+      name: "Music Video Orchestrator Agent",
+      description:
+        "Orchestrates the generation of complete music videos from a user prompt by coordinating multiple A2A-compatible sub-agents (song, script, image/video). Exposes A2A endpoints for task orchestration, streaming, and push notifications.",
+      url: "http://localhost:8000",
       version: "1.0.0",
+      documentationUrl:
+        "https://github.com/nevermined-io/music-video-orchestrator-a2a",
       capabilities: {
         streaming: true,
         pushNotifications: true,
         stateTransitionHistory: true,
       },
-      defaultInputModes: ["text/plain", "application/json"],
+      defaultInputModes: ["application/json", "text/plain"],
       defaultOutputModes: ["application/json", "text/plain"],
       skills: [
         {
-          id: "echo",
-          name: "Echo",
-          description: "Echoes the input text.",
-          tags: ["echo"],
-          examples: ["Say hello"],
-          inputModes: ["text/plain"],
-          outputModes: ["text/plain"],
+          id: "music-video-orchestration",
+          name: "Music Video Orchestration",
+          description:
+            "Generates a complete music video from a user prompt by orchestrating song, script, and video generation tasks using the A2A protocol.",
+          tags: ["music", "video", "orchestration", "a2a", "ai"],
+          examples: [
+            "Create a cyberpunk rap anthem about AI collaboration",
+            "Generate a romantic ballad video set in Paris",
+          ],
+          inputModes: ["application/json", "text/plain"],
+          outputModes: ["application/json", "text/plain"],
         },
       ],
     });
@@ -112,13 +116,11 @@ export class A2AController {
     try {
       const { jsonrpc, id, method, params } = req.body;
       if (jsonrpc !== "2.0" || !id || !method || !params) {
-        res
-          .status(400)
-          .json({
-            jsonrpc: "2.0",
-            id: id || null,
-            error: { code: -32600, message: "Invalid JSON-RPC 2.0 request" },
-          });
+        res.status(400).json({
+          jsonrpc: "2.0",
+          id: id || null,
+          error: { code: -32600, message: "Invalid JSON-RPC 2.0 request" },
+        });
         return;
       }
       const { message, sessionId, metadata } = params;
@@ -128,16 +130,14 @@ export class A2AController {
         !message.parts[0] ||
         !message.parts[0].text
       ) {
-        res
-          .status(400)
-          .json({
-            jsonrpc: "2.0",
-            id,
-            error: {
-              code: -32602,
-              message: "Task must contain a non-empty message text",
-            },
-          });
+        res.status(400).json({
+          jsonrpc: "2.0",
+          id,
+          error: {
+            code: -32602,
+            message: "Task must contain a non-empty message text",
+          },
+        });
         return;
       }
       const task: Task = {
@@ -169,13 +169,11 @@ export class A2AController {
     try {
       const { jsonrpc, id, method, params } = req.body;
       if (jsonrpc !== "2.0" || !id || !method || !params) {
-        res
-          .status(400)
-          .json({
-            jsonrpc: "2.0",
-            id: id || null,
-            error: { code: -32600, message: "Invalid JSON-RPC 2.0 request" },
-          });
+        res.status(400).json({
+          jsonrpc: "2.0",
+          id: id || null,
+          error: { code: -32600, message: "Invalid JSON-RPC 2.0 request" },
+        });
         return;
       }
       const { message, sessionId, metadata, notification } = params;
@@ -185,16 +183,14 @@ export class A2AController {
         !message.parts[0] ||
         !message.parts[0].text
       ) {
-        res
-          .status(400)
-          .json({
-            jsonrpc: "2.0",
-            id,
-            error: {
-              code: -32602,
-              message: "Task must contain a non-empty message text",
-            },
-          });
+        res.status(400).json({
+          jsonrpc: "2.0",
+          id,
+          error: {
+            code: -32602,
+            message: "Task must contain a non-empty message text",
+          },
+        });
         return;
       }
       const task: Task = {
@@ -252,7 +248,7 @@ export class A2AController {
    * @method listTasks
    * @description List all tasks
    */
-  public listTasks = async (req: Request, res: Response): Promise<void> => {
+  public listTasks = async (_req: Request, res: Response): Promise<void> => {
     try {
       const tasks = await this.taskStore.listTasks();
       res.json(tasks);

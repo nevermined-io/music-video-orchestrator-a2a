@@ -1,202 +1,152 @@
 [![banner](https://raw.githubusercontent.com/nevermined-io/assets/main/images/logo/banner_logo.png)](https://nevermined.io)
 
-Music Video Orchestrator Agent using Nevermined's Payments API (TypeScript)
-===========================================================================
+# Music Video Orchestrator Agent (A2A Protocol, TypeScript)
 
-> A TypeScript-based orchestrator that generates complete music videos from a user prompt, leveraging the **Nevermined Payments API**. It coordinates multiple sub-agents (song generator, script generator, image/video generator), handles token swaps when necessary, and compiles everything into a final MP4 video uploaded to IPFS via Pinata.
+> A TypeScript-based orchestrator that generates complete music videos from a user prompt, coordinating multiple sub-agents (song generator, script generator, image/video generator) using the **A2A (Agent-to-Agent) protocol**. Supports JSON-RPC 2.0, Server-Sent Events (SSE), webhooks, and real-time task orchestration.
 
-* * *
+---
 
-Description
------------
+## Description
 
-This project demonstrates how to build an **Orchestrator** that receives a creative brief for a music video (e.g., "A cyberpunk rap anthem about AI collaboration"), then proceeds through several steps to:
+This project demonstrates how to build an **Orchestrator Agent** that receives a creative brief for a music video (e.g., "A cyberpunk rap anthem about AI collaboration"), then proceeds through several steps to:
 
-1.  **Generate a Song** (lyrics + audio track)
-2.  **Generate a Script** (scenes, camera movements, character descriptions, settings)
-3.  **Create Images** for each character and setting
+1.  **Generate a Song** (lyrics + audio track) via an A2A-compatible Song Generator Agent
+2.  **Generate a Script** (scenes, camera movements, character descriptions, settings) via an A2A-compatible Script Generator Agent
+3.  **Create Images** for each character and setting via an A2A-compatible Image/Video Generator Agent
 4.  **Produce Short Video Clips** based on the generated prompts
 5.  **Compile** the clips and audio track into a final music video (MP4)
 6.  **Return** the final IPFS URL for the video to the user
 
-While orchestrating these tasks, the system also uses **Nevermined** to:
+All orchestration and communication between agents is performed using the **A2A protocol** (JSON-RPC 2.0 over HTTP, with support for streaming/SSE and webhooks).
 
-*   Validate **payment plans** for each agent (Song, Script, Video, etc.)
-*   Automatically **swap** tokens if an agent requires payment in a currency different from the Orchestrator's base token
-*   **Log** events and results both locally and via the **Nevermined Payments** service
+## Related Projects
 
-* * *
+- [Song Generator Agent A2A](https://github.com/nevermined-io/song-generation-agent-a2a)
+- [Script Generator Agent A2A](https://github.com/nevermined-io/movie-script-generator-agent-a2a)
+- [Image / Video Generator Agent A2A](https://github.com/nevermined-io/video-generator-agent-a2a)
 
-**Related Projects**
---------------------
+## Example Workflow
 
-This **Music Video Orchestrator Agent** is part of a larger ecosystem of AI-driven media creation. For a complete view of how multiple agents work together, see:
+[User Prompt]
+   |
+   v
+[Orchestrator]
+   |--(A2A)--> [Song Generator Agent]
+   |--(A2A)--> [Script Generator Agent]
+   |--(A2A, concurrent)--> [Media Generator Agent] (images/videos)
+   |--(local)--> [Compile video + audio]
+   |--(local)--> [Upload to IPFS]
+   v
+[Return final video URL]
 
-1.  [Song Generator Agent](https://github.com/nevermined-io/song-generation-agent)
-    
-    *   Produces lyrics, titles, and final audio tracks using LangChain + OpenAI and a chosen music generation API.
-2.  [Script Generator Agent](https://github.com/nevermined-io/movie-script-generator-agent)
+---
 
-*   Generates cinematic scripts, extracts scene info, identifies settings and characters, producing prompts for video generation.
-3.  [Image / Video Generator Agent](https://github.com/nevermined-io/video-generator-agent)
-    
-    *   Produces Images / Video using 3rd party wrapper APIs (Fal.ai and TTapi, wrapping Flux and Kling.ai)
+## Table of Contents
 
-**Workflow Example**:
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Environment Variables](#environment-variables)
+- [Project Structure](#project-structure)
+- [Main Orchestration Flow](#main-orchestration-flow)
+- [A2A Protocol & Interoperability](#a2a-protocol--interoperability)
+- [Usage](#usage)
+- [License](#license)
 
-```
-[ User Prompt ] --> [Music Orchestrator] --> [Song Generation] --> [Script Generation] --> [Image/Video Generation] --> [Final Compilation] --> [IPFS Upload]
-```
+---
 
-* * *
+## Prerequisites
 
-Table of Contents
------------------
+- **Node.js** (>= 14 recommended)
+- **TypeScript** (project built on version 4.x or later)
+- **Pinata** account with API key and secret for IPFS uploads (optional, for video storage)
 
-*   [Prerequisites](#prerequisites)
-*   [Installation](#installation)
-*   [Environment Variables](#environment-variables)
-*   [Project Structure](#project-structure)
-*   [Architecture and Workflow](#architecture-and-workflow)
-*   [Usage](#usage)
-*   [How It Works Internally](#how-it-works-internally)
-*   [License](#license)
+## Installation
 
-* * *
+1. **Clone** the repository:
+   ```bash
+   git clone https://github.com/nevermined-io/music-video-orchestrator-a2a.git
+   cd music-video-orchestrator-a2a
+   ```
+2. **Install** dependencies:
+   ```bash
+   npm install
+   ```
+3. **Build** the project (optional step if you want the compiled JS):
+   ```bash
+   npm run build
+   ```
 
-### Prerequisites
+## Environment Variables
 
-*   **Node.js** (>= 14 recommended)
-*   **TypeScript** (project built on version 4.x or later)
-*   Valid **Nevermined** credentials (API key, plan DIDs, agent DIDs, etc.)
-*   **Pinata** account with API key and secret for IPFS uploads
-*   Optional: A running **Ethereum node** or an RPC endpoint for swaps (if using Uniswap functionality)
-
-### Installation
-
-1.  **Clone** the repository:
-    
-    ```bash
-    git clone https://github.com/nevermined-io/music-video-orchestrator.git
-    cd music-video-orchestrator
-    ```
-    
-2.  **Install** dependencies:
-    
-    ```bash
-    npm install
-    ```
-    
-3.  **Build** the project (optional step if you want the compiled JS):
-    
-    ```bash
-    npm run build
-    ```
-    
-
-### Environment Variables
-
-Rename `.env.example` to `.env` and configure all relevant environment variables. Below is a sample of key variables you might need:
+Rename `.env.example` to `.env` and configure all relevant environment variables. Example:
 
 ```makefile
-# Nevermined
-NVM_API_KEY=yourNeverminedApiKey
-NVM_ENVIRONMENT=testing|base|staging|production
-
-# Orchestrator's DID
-AGENT_DID=did:nv:1111aaaa-bbbb-cccc-dddd-orchestrator
-
-# Agent DIDs
-MUSIC_SCRIPT_GENERATOR_DID=did:nv:2222aaaa-music-script
-SONG_GENERATOR_DID=did:nv:3333aaaa-song-gen
-VIDEO_GENERATOR_DID=did:nv:4444aaaa-video-gen
-
-# Plan DIDs
-PLAN_DID=did:nv:7777aaaa-our-main-plan
-SONG_GENERATOR_PLAN_DID=did:nv:8888aaaa-song-plan
-MUSIC_SCRIPT_GENERATOR_PLAN_DID=did:nv:9999aaaa-script-plan
-VIDEO_GENERATOR_PLAN_DID=did:nv:aaaa1111-video-plan
-
-# Pinata Config for IPFS uploads
+# Pinata Config for IPFS uploads (optional)
 PINATA_API_KEY=your_pinata_api_key
 PINATA_API_SECRET=your_pinata_api_secret
-
-# Blockchain / Uniswap
-RPC_URL=https://...
-PRIVATE_KEY=0xYourPrivateKey
-UNISWAP_V2_ROUTER_ADDRESS=0xUniswapRouter
-UNISWAP_V2_FACTORY_ADDRESS=0xUniswapFactory
 ```
 
-Each of these variables controls a part of the Orchestrator's workflow, including Nevermined environment details, agent and plan DIDs, Pinata credentials for IPFS uploads, and the blockchain config for token swaps.
-
-### Project Structure
+## Project Structure
 
 ```
 .
-├── config
-│   └── env.ts               # Loads environment variables
-├── logger
-│   └── logger.ts            # Logger configuration using pino
-├── payments
-│   ├── blockchain.ts        # Handles token swaps & ERC20 logic
-│   ├── ensureBalance.ts     # Checks if plan has enough credits; does swaps if needed
-│   └── paymentsInstance.ts  # Initializes the Nevermined Payments library
-├── steps
-│   ├── stepHandlers.ts      # Main step logic (song/script/video generation + compilation)
-│   └── taskValidation.ts    # Validates outputs of each task
-├── utils
-│   ├── logMessage.ts        # Log utility (local + remote)
-│   ├── uploadVideoToIPFS.ts # Uploads compiled video to IPFS using Pinata
-│   └── utils.ts             # Helpers (e.g., FFmpeg usage)
-├── main.ts                  # Entry point subscribing to "step-updated" events
+├── src
+│   ├── agents
+│   │   ├── a2aAgentClient.ts         # A2A client for fetching agent cards
+│   │   └── a2aResultExtractor.ts     # Utilities to extract characters, settings, scenes
+│   ├── controllers
+│   │   └── a2aController.ts          # Main A2A controller
+│   ├── core
+│   │   ├── errorHandler.ts           # Error handling
+│   │   ├── logger.ts                 # Logging utility
+│   │   ├── sessionManager.ts         # Session management
+│   │   ├── taskProcessor.ts          # Task processing logic
+│   │   ├── taskQueue.ts              # Task queue management
+│   │   ├── taskStore.ts              # In-memory task storage
+│   │   └── videoUtils.ts             # Video compilation utilities
+│   ├── models
+│   │   ├── a2aEventType.ts           # Unified A2A event type enum
+│   │   └── task.ts                   # Task and TaskState definitions
+│   ├── routes
+│   │   └── a2aRoutes.ts              # Express routes for A2A endpoints
+│   ├── services
+│   │   ├── mediaGeneration.ts        # Image and video generation helpers
+│   │   ├── orchestrationTasks.ts     # Song and script generation helpers
+│   │   ├── pushNotificationService.ts# SSE & webhook notifications
+│   │   ├── streamingService.ts       # SSE streaming service
+│   │   └── uploadVideoToIPFS.ts      # Uploads compiled video to IPFS
+│   ├── orchestrator.ts               # Main orchestration workflow
+│   └── server.ts                     # Express server entry point
 ├── package.json
-├── README.md                # This file
+├── README.md
 ├── tsconfig.json
 ├── .gitignore
 └── .env
 ```
 
-*   **`main.ts`**: Initializes the Orchestrator, listens for relevant events, and calls `processSteps()`.
-*   **`stepHandlers.ts`**: Defines a handler function for each phase of the pipeline (`callSongGenerator`, `generateMusicScript`, `callImagesGenerator`, `callVideoGenerator`, `compileVideo`, etc.).
-*   **`payments/blockchain.ts`**: Performs the actual Uniswap V2 swaps if an agent charges in a token we don't currently hold.
-*   **`payments/ensureBalance.ts`**: A utility that checks if we have enough credits for a plan, or triggers a purchase or swap if we're short.
-*   **`steps/taskValidation.ts`**: Once a sub-task (e.g., "Generate Song") completes, we parse its output artifacts (like MP3 URL), ensuring correctness.
-*   **`utils/uploadVideoToIPFS.ts`**: Handles uploading the final compiled video to IPFS using Pinata's API.
+## Main Orchestration Flow
 
-### Architecture and Workflow
+The main orchestration logic is implemented in [`src/orchestrator.ts`](src/orchestrator.ts):
 
-1.  **Initial Step**
-    
-    *   A new user prompt arrives, creating an `init` step. The orchestrator spawns subsequent steps:
-        1.  `callSongGenerator`
-        2.  `generateMusicScript`
-        3.  `callImagesGenerator`
-        4.  `callVideoGenerator`
-        5.  `compileVideo`
-2.  **Song Generation** (`callSongGenerator`)
-    
-    *   Checks balance for `SONG_GENERATOR_PLAN_DID`.
-    *   Swaps tokens if needed (e.g., from USDC to VIRTUAL).
-    *   Calls the Song Generator to produce lyrics, title, tags, MP3 and duration.
-3.  **Music Script** (`generateMusicScript`)
-    
-    *   Checks balance for `MUSIC_SCRIPT_GENERATOR_PLAN_DID` (in LARRY, for example).
-    *   Generates a detailed script with camera movements, character lists, and environment prompts.
-4.  **Images** (`callImagesGenerator`)
-    
-    *   Each character and setting from the script is given to the Image/Video Generator.
-    *   The system concurrently requests images for each subject, storing URLs in the step's artifacts.
-5.  **Video** (`callVideoGenerator`)
-    
-    *   For each scene prompt, the system requests a short video clip.
-    *   Again, it checks or swaps tokens if the plan is short on credits.
-6.  **Compilation** (`compileVideo`)
-    
-    *   Merges all video clips with FFmpeg, applies the audio track, and uploads the final `.mp4` to IPFS via Pinata.
-    *   Returns the final video URL (IPFS gateway URL) as the completion output.
+1. **Agent Discovery**: Fetches the agentCard of each sub-agent (song, script, media) using A2A discovery.
+2. **Song Generation**: Sends a prompt to the Song Generator Agent (A2A) and receives the song, audio URL, and title.
+3. **Script Generation**: Sends the prompt and song result to the Script Generator Agent (A2A) and receives the script.
+4. **Extraction**: Extracts characters, settings, and scenes from the script using utility functions.
+5. **Media Generation**: Requests the Media Agent (A2A) to generate images for characters/settings and video clips for each scene.
+6. **Compilation**: Compiles all video clips and the audio track into a final music video (MP4) using FFmpeg utilities.
+7. **IPFS Upload**: Uploads the final video to IPFS via Pinata and returns the IPFS URL.
+8. **Result**: Returns a structured result with all generated artifacts and metadata.
 
-### Usage
+## A2A Protocol & Interoperability
+
+- The orchestrator exposes endpoints compatible with the [A2A (Agent-to-Agent) protocol](https://github.com/google/a2a), supporting:
+  - JSON-RPC 2.0 methods: `/tasks/send`, `/tasks/sendSubscribe`, etc.
+  - Real-time updates via Server-Sent Events (SSE)
+  - Push notifications via webhooks
+  - Agent discovery via `/.well-known/agent.json` (agentCard)
+- Any other agent or client that implements A2A can interoperate with this orchestrator.
+
+## Usage
 
 Once your environment is set up and dependencies are installed, run:
 
@@ -206,25 +156,13 @@ npm start
 ```
 
 The Orchestrator will:
+- Expose A2A endpoints for task orchestration and status updates
+- Accept music video prompts and coordinate sub-agents using A2A
+- Stream task updates and results via SSE or webhooks
 
-1.  **Log in** to the Nevermined Payments API with your `NVM_API_KEY`.
-2.  Subscribe to any `step-updated` events directed to your `AGENT_DID`.
-3.  Whenever a new workflow step is triggered for your agent, it will route it to the correct function in `stepHandlers.ts`.
-4.  **Automatically** handle token swaps, sub-task creation, and logging.
-5.  **Produce** and store the final compiled music video in IPFS via Pinata.
+---
 
-### How It Works Internally
-
-*   **Nevermined Payment Plans**: Each agent has its own DID and plan. The orchestrator checks if there's enough balance before creating a sub-task for that agent. If not, it orders more credits—potentially swapping tokens to match what the agent requires.
-*   **Concurrent Tasks**: For image or video generation, the orchestrator can create tasks in parallel. This is especially handy when generating multiple scenes at once.
-*   **FFmpeg Merging**: The final step stitches together all video clips (scene by scene) and lays the audio track on top. Temporary files reside in `/tmp` or a similar location; afterward, the result is uploaded to IPFS via Pinata.
-*   **IPFS Storage**: The final video is uploaded to IPFS using Pinata's API, which provides a gateway URL for easy access to the content.
-*   **Logging**: The system logs each action both locally (via `pino`) and remotely (via `payments.query.logTask()`), making it easy to see errors, transaction hashes, or final file URLs.
-
-* * *
-
-License
--------
+## License
 
 ```
 Apache License 2.0
