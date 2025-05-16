@@ -6,13 +6,11 @@
 import { AgentCard } from "../types/AgentCard";
 import { v4 as uuidv4 } from "uuid";
 import { Logger } from "../core/logger";
-import http from "http";
-import https from "https";
-import { URL } from "url";
+import axios from "axios";
 
 /**
  * Fetches the Agent Card from any A2A agent.
- * @param {string} agentUrl - Base URL of the agent (e.g. http://localhost:8001)
+ * @param {string} agentUrl - Base URL of the agent (e.g. http://localhost:8000)
  * @returns {Promise<AgentCard>}
  */
 export async function fetchAgentCard(agentUrl: string): Promise<AgentCard> {
@@ -171,13 +169,12 @@ function normalizeA2AMessage(params: any, agentCard: any): object {
 }
 
 /**
- * Builds the JSON-RPC 2.0 request body for /tasks/sendSubscribe with SSE notification.
- * Removes the 'message' field from the metadata to avoid duplication, as the message is sent explicitly.
+ * Builds the JSON-RPC 2.0 request body for /tasks/send.
  * @param {any} params Parameters for the agent
  * @param {any} agentCard The agent card describing the agent's API
  * @returns {object} JSON-RPC request body
  */
-function buildJsonRpcRequest(params: any, agentCard: AgentCard): object {
+function buildJsonRpcSendRequest(params: any, agentCard: AgentCard): object {
   const sessionId = params.sessionId || uuidv4();
   const requestId = uuidv4();
   const message = normalizeA2AMessage(params, agentCard);
@@ -187,97 +184,34 @@ function buildJsonRpcRequest(params: any, agentCard: AgentCard): object {
   if ("message" in paramsForMetadata) {
     delete paramsForMetadata.message;
   }
-
   return {
     jsonrpc: "2.0",
     id: requestId,
-    method: "tasks/sendSubscribe",
+    method: "tasks/send",
     params: {
       sessionId,
       message,
       metadata: paramsForMetadata,
       acceptedOutputModes: params.acceptedOutputModes || ["text"],
-      notification: {
-        mode: "sse",
-        eventTypes: ["status_update", "completion", "error"],
-      },
     },
   };
 }
 
 /**
- * Creates and returns an HTTP(S) request object for SSE communication.
- * @param {string} agentUrl Base URL of the agent
- * @returns {object} { client, url, options }
- */
-function createSSERequest(agentUrl: string) {
-  const url = new URL("/tasks/sendSubscribe", agentUrl);
-  const isHttps = url.protocol === "https:";
-  const options = {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "text/event-stream",
-    },
-  };
-  const client = isHttps ? https : http;
-  return { client, url, options };
-}
-
-/**
- * Parses a single SSE event block and returns event type and data string.
- * @param {string} rawEvent The raw SSE event string
- * @returns {object} An object containing eventType and data
- */
-function parseSSEEvent(rawEvent: string): { eventType: string; data: string } {
-  const lines = rawEvent.split("\n");
-  let data = "";
-  let eventType = "message"; // Default event type per SSE spec
-
-  for (const line of lines) {
-    if (line.startsWith("data:")) {
-      data += line.slice(5).trim();
-    } else if (line.startsWith("event:")) {
-      eventType = line.slice(6).trim();
-    }
-  }
-
-  return { eventType, data };
-}
-
-/**
- * Processes an SSE chunk, accumulating in the buffer and calling onEvent for each parsed event.
- * @param {string} chunk Received SSE chunk
- * @param {object} bufferObj Object with buffer property (to maintain reference)
- * @param {(eventType: string, data: string) => void} onEvent Callback for each parsed SSE event
- */
-function processSSEChunk(
-  chunk: string,
-  bufferObj: { buffer: string },
-  onEvent: (eventType: string, data: string) => void
-) {
-  bufferObj.buffer += chunk;
-  let eventEnd;
-  while ((eventEnd = bufferObj.buffer.indexOf("\n\n")) !== -1) {
-    const rawEvent = bufferObj.buffer.slice(0, eventEnd);
-    bufferObj.buffer = bufferObj.buffer.slice(eventEnd + 2);
-    const { eventType, data } = parseSSEEvent(rawEvent);
-    if (data) {
-      onEvent(eventType, data);
-    }
-  }
-}
-
-/**
- * Sends a task to any A2A agent using /tasks/sendSubscribe and processes SSE events from the same connection.
- * @param agentUrl Base URL of the agent (e.g. http://localhost:8001)
+ * Sends a task to any A2A agent using /tasks/send and polls for completion.
+ * @param agentUrl Base URL of the agent (e.g. http://localhost:8000)
  * @param params Parameters for the agent
+ * @param agentCard The agent card describing the agent's API
+ * @param pollingInterval Polling interval in ms (default: 2000)
+ * @param maxRetries Maximum number of polling attempts (default: 120)
  * @returns {Promise<any>} Resolves with the final result when the task is completed.
  */
 export async function sendTask(
   agentUrl: string,
   params: any,
-  agentCard: AgentCard
+  agentCard: AgentCard,
+  pollingInterval = 2000,
+  maxRetries = 120
 ): Promise<any> {
   Logger.info(
     "[sendTask] Sending task to agent",
@@ -285,62 +219,70 @@ export async function sendTask(
     "with params:",
     params
   );
-  return new Promise((resolve, reject) => {
-    const jsonRpcRequest = buildJsonRpcRequest(params, agentCard);
-    const { client, url, options } = createSSERequest(agentUrl);
-    const req = client.request(url, options, (res) => {
-      if (res.statusCode !== 200) {
-        reject(new Error(`Server responded with status ${res.statusCode}`));
-        return;
-      }
-      res.setEncoding("utf8");
-      const bufferObj = { buffer: "" };
-      Logger.info(
-        "[sendTask] SSE connection established. Waiting for events..."
-      );
-      res.on("data", (chunk) => {
-        processSSEChunk(chunk, bufferObj, (eventType, data) => {
-          try {
-            const parsed = JSON.parse(data);
-            Logger.info(`[sendTask][SSE][${eventType}]`, parsed);
+  // 1. Send the initial task
+  const jsonRpcRequest = buildJsonRpcSendRequest(params, agentCard);
+  const sendResponse = await axios.post(
+    `${agentUrl}/tasks/send`,
+    jsonRpcRequest,
+    {
+      headers: { "Content-Type": "application/json" },
+    }
+  );
+  if (
+    !sendResponse.data ||
+    !sendResponse.data.result ||
+    !sendResponse.data.result.id
+  ) {
+    throw new Error("Invalid response from agent: missing result.id");
+  }
+  const taskId = sendResponse.data.result.id;
+  Logger.info(`[sendTask] Task created with ID: ${taskId}`);
 
-            // Handle based on SSE event type
-            if (eventType === "status_update") {
-              // Process status update
-              // If final is true, resolve the promise as this is the end of the task
-              if (parsed?.final === true) {
-                resolve(parsed);
-              }
-            } else if (eventType === "artifact") {
-              // Process artifact event
-              // Check if this is the last chunk of the artifact
-              if (parsed?.artifact?.lastChunk === true) {
-                resolve(parsed);
-              }
-            } else if (eventType === "error") {
-              // Reject the promise with the error
-              reject(parsed);
-            } else if (eventType === "completion") {
-              // Handle explicit completion events
-              resolve(parsed);
-            }
-          } catch (err) {
-            Logger.error("[sendTask] Failed to parse SSE data:", data, err);
-          }
+  // 2. Poll for completion
+  let retries = 0;
+  let lastState = "";
+  while (retries < maxRetries) {
+    let statusResponse;
+    try {
+      statusResponse = await axios.get(`${agentUrl}/tasks/${taskId}`, {
+        timeout: 10000,
+        headers: {
+          "User-Agent": "Mozilla/5.0",
+          Accept: "application/json",
+          Connection: "close",
+        },
+      });
+    } catch (error) {
+      if (error.isAxiosError) {
+        Logger.error("Axios error:", {
+          message: error.message,
+          code: error.code,
+          errno: error.errno,
+          config: error.config,
+          stack: error.stack,
         });
-      });
-      res.on("end", () => {
-        Logger.info("[sendTask] SSE connection closed by server.");
-        resolve(null);
-      });
-      res.on("error", (err) => {
-        reject(err);
-      });
-    });
-    req.on("error", (err) => {
-      reject(err);
-    });
-    req.write(JSON.stringify(jsonRpcRequest));
-    req.end();
-  });
+      } else {
+        Logger.error("Unknown error:", error);
+      }
+      throw error;
+    }
+    const status = statusResponse.data.status.state;
+    if (status !== lastState) {
+      Logger.info(`[sendTask] Task status: ${status}`);
+      lastState = status;
+    }
+    if (status === "completed") {
+      Logger.info("[sendTask] Task completed!");
+      return statusResponse.data;
+    } else if (status === "failed") {
+      throw new Error(
+        `[sendTask] Task failed: ${statusResponse.data.status.error}`
+      );
+    } else if (status === "cancelled") {
+      throw new Error("[sendTask] Task was cancelled");
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollingInterval));
+    retries++;
+  }
+  throw new Error("[sendTask] Timeout waiting for task completion");
 }

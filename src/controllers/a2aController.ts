@@ -31,11 +31,15 @@ export class A2AController {
   constructor() {
     this.taskStore = new TaskStore();
     this.taskProcessor = new TaskProcessor(this.taskStore);
-    this.taskQueue = new TaskQueue(this.taskProcessor, 2);
+    this.taskQueue = new TaskQueue(this.taskProcessor, {
+      maxConcurrent: 2,
+      maxRetries: 3,
+      retryDelay: 1000,
+    });
     this.pushNotificationService = new PushNotificationService();
     this.streamingService = new StreamingService();
     this.taskStore.addStatusListener(async (task: Task) => {
-      // Notificar SSE y webhooks
+      // Notify SSE and webhooks
       const isFinal = [
         TaskState.COMPLETED,
         TaskState.CANCELLED,
@@ -78,8 +82,12 @@ export class A2AController {
     res.json({
       name: "Music Video Orchestrator Agent",
       description:
-        "Orchestrates the generation of complete music videos from a user prompt by coordinating multiple A2A-compatible sub-agents (song, script, image/video). Exposes A2A endpoints for task orchestration, streaming, and push notifications.",
+        "Orchestrates the creation of complete music videos from a user prompt, coordinating song, script, and media generation via the A2A protocol. Returns a final video and all intermediate artifacts.",
       url: "http://localhost:8000",
+      provider: {
+        organization: "Nevermined AG",
+        url: "https://nevermined.io",
+      },
       version: "1.0.0",
       documentationUrl:
         "https://github.com/nevermined-io/music-video-orchestrator-a2a",
@@ -88,21 +96,104 @@ export class A2AController {
         pushNotifications: true,
         stateTransitionHistory: true,
       },
-      defaultInputModes: ["application/json", "text/plain"],
+      authentication: null,
+      defaultInputModes: ["text/plain", "application/json"],
       defaultOutputModes: ["application/json", "text/plain"],
       skills: [
         {
           id: "music-video-orchestration",
-          name: "Music Video Orchestration",
+          name: "Music Video Generation",
           description:
-            "Generates a complete music video from a user prompt by orchestrating song, script, and video generation tasks using the A2A protocol.",
-          tags: ["music", "video", "orchestration", "a2a", "ai"],
+            "Generates a full music video (MP4) from a creative prompt, coordinating song, script, and media generation. Returns the final video and all intermediate artifacts (lyrics, audio, script, images, video clips, IPFS URL).",
+          tags: ["music", "video", "orchestration", "a2a", "multimodal"],
           examples: [
-            "Create a cyberpunk rap anthem about AI collaboration",
-            "Generate a romantic ballad video set in Paris",
+            {
+              role: "user",
+              parts: [
+                {
+                  type: "text",
+                  text: "Create a cyberpunk rap anthem about AI collaboration.",
+                },
+              ],
+            },
+            {
+              role: "user",
+              parts: [
+                {
+                  type: "text",
+                  text: "Make a pop video about summer adventures with robots.",
+                },
+              ],
+            },
           ],
-          inputModes: ["application/json", "text/plain"],
-          outputModes: ["application/json", "text/plain"],
+          inputModes: ["text/plain", "application/json"],
+          outputModes: ["application/json", "video/mp4", "text/plain"],
+          parameters: {
+            message: {
+              type: "object",
+              description:
+                "A2A Message object containing the user creative prompt for the music video.",
+              properties: {
+                role: {
+                  type: "string",
+                  description: "Role of the sender, usually 'user'.",
+                },
+                parts: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      type: {
+                        type: "string",
+                        enum: ["text"],
+                        description: "Type of part, must be 'text'.",
+                      },
+                      text: {
+                        type: "string",
+                        description: "Prompt text for the music video.",
+                      },
+                    },
+                    required: ["type", "text"],
+                  },
+                },
+              },
+              required: ["role", "parts"],
+            },
+          },
+          returns: {
+            type: "object",
+            description:
+              "Structured result with all generated artifacts and metadata.",
+            properties: {
+              videoUrl: {
+                type: "string",
+                description: "IPFS URL of the final video (MP4)",
+              },
+              lyrics: { type: "string", description: "Generated song lyrics" },
+              audioUrl: {
+                type: "string",
+                description: "URL of the generated audio track",
+              },
+              script: {
+                type: "object",
+                description: "Generated script (scenes, characters, settings)",
+              },
+              images: {
+                type: "array",
+                items: { type: "string" },
+                description: "URLs of generated images",
+              },
+              videoClips: {
+                type: "array",
+                items: { type: "string" },
+                description: "URLs of generated video clips",
+              },
+              metadata: {
+                type: "object",
+                description: "Additional metadata about the process",
+              },
+            },
+          },
         },
       ],
     });
@@ -151,7 +242,9 @@ export class A2AController {
         metadata,
       };
       await this.taskStore.createTask(task);
+      // Enqueue the task for processing using TaskQueue
       await this.taskQueue.enqueueTask(task);
+      // Respond with the initial task object (status will be updated asynchronously)
       res.json({ jsonrpc: "2.0", id, result: task });
     } catch (error) {
       ErrorHandler.handleHttpError(error as Error, res);

@@ -6,16 +6,13 @@
   "author": "Charly López",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/main.js",
-    "dev": "nodemon --watch src --exec ts-node src/main.ts"
+    "start": "node dist/src/server.js",
+    "dev": "nodemon --watch src --exec ts-node src/server.ts"
   },
   "dependencies": {
-    "@nevermined-io/payments": "^0.8.2",
     "@pinata/sdk": "^2.1.0",
-    "@uniswap/sdk-core": "^7.5.0",
-    "@uniswap/v2-sdk": "^4.13.0",
+    "cors": "^2.8.5",
     "dotenv": "^16.4.5",
-    "ethers": "^5.7.2",
     "eventsource": "^2.0.2",
     "express": "^5.1.0",
     "fluent-ffmpeg": "^2.1.3",

@@ -110,8 +110,7 @@ PINATA_API_SECRET=your_pinata_api_secret
 │   ├── routes
 │   │   └── a2aRoutes.ts              # Express routes for A2A endpoints
 │   ├── services
-│   │   ├── mediaGeneration.ts        # Image and video generation helpers
-│   │   ├── orchestrationTasks.ts     # Song and script generation helpers
+│   │   ├── orchestrationTasks.ts     # Song, script, image and video generation helpers
 │   │   ├── pushNotificationService.ts# SSE & webhook notifications
 │   │   ├── streamingService.ts       # SSE streaming service
 │   │   └── uploadVideoToIPFS.ts      # Uploads compiled video to IPFS
@@ -159,6 +158,30 @@ The Orchestrator will:
 - Expose A2A endpoints for task orchestration and status updates
 - Accept music video prompts and coordinate sub-agents using A2A
 - Stream task updates and results via SSE or webhooks
+
+### Example JSON-RPC 2.0 Request
+
+To request a music video orchestration, send a POST to `/tasks/send` with a body like:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req-001",
+  "method": "tasks/send",
+  "params": {
+    "id": "task-001",
+    "sessionId": "session-001",
+    "message": {
+      "role": "user",
+      "parts": [
+        { "type": "text", "text": "Create a cyberpunk rap anthem about AI collaboration." }
+      ]
+    }
+  }
+}
+```
+
+The `message` parameter must be an object with a `role` (usually `user`) and a `parts` array, where the first part contains the prompt text.
 
 ---
 

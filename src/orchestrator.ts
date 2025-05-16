@@ -12,10 +12,11 @@ import {
 import { Logger } from "./core/logger";
 import { compileMusicVideo } from "./core/videoUtils";
 import {
+  generateSong,
+  generateScript,
   generateCharacterAndSettingImages,
   generateVideoClips,
-} from "./services/mediaGeneration";
-import { generateSong, generateScript } from "./services/orchestrationTasks";
+} from "./services/orchestrationTasks";
 import { uploadVideoToIPFS } from "./services/uploadVideoToIPFS";
 import fs from "fs";
 
