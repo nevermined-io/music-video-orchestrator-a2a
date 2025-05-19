@@ -219,7 +219,7 @@ export async function generateVideoClips(
     return videoUrl || null;
   }
   const videoClipResults = await Promise.all(
-    scenes.slice(0, 1).map((scene) => processScene(scene)) //TODO: Remove slice
+    scenes.map((scene) => processScene(scene))
   );
   return videoClipResults.filter((url) => !!url);
 }
