@@ -6,7 +6,7 @@
 import { Task, TaskState } from "../models/task";
 import { TaskStore } from "./taskStore";
 import { startOrchestration } from "../orchestrator";
-import { Logger } from "./logger";
+import { Logger } from "../utils/logger";
 
 /**
  * @class TaskProcessor

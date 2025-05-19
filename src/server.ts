@@ -7,7 +7,7 @@
 import express, { Request, Response } from "express";
 import { startOrchestration } from "./orchestrator";
 import a2aRoutes from "./routes/a2aRoutes";
-import { Logger } from "./core/logger";
+import { Logger } from "./utils/logger";
 import { getEnvConfig } from "./config/checkEnv";
 import cors from "cors";
 

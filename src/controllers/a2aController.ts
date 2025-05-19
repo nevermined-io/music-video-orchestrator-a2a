@@ -6,7 +6,7 @@
 import { Request, Response } from "express";
 import { Task, TaskState } from "../models/task";
 import { TaskStore } from "../core/taskStore";
-import { ErrorHandler } from "../core/errorHandler";
+import { ErrorHandler } from "../utils/errorHandler";
 import { TaskProcessor } from "../core/taskProcessor";
 import { TaskQueue } from "../core/taskQueue";
 import {

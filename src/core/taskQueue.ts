@@ -5,7 +5,7 @@
 
 import { Task } from "../models/task";
 import { TaskProcessor } from "./taskProcessor";
-import { Logger } from "../core/logger";
+import { Logger } from "../utils/logger";
 
 /**
  * @interface QueueConfig

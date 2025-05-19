@@ -4,7 +4,7 @@
  */
 
 import { Task } from "../models/task";
-import { Logger } from "../core/logger";
+import { Logger } from "../utils/logger";
 
 /**
  * @typedef {Function} StatusListener

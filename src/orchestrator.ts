@@ -9,8 +9,8 @@ import {
   extractSettings,
   extractScenes,
 } from "./agents/a2aResultExtractor";
-import { Logger } from "./core/logger";
-import { compileMusicVideo } from "./core/videoUtils";
+import { Logger } from "./utils/logger";
+import { compileMusicVideo } from "./utils/videoUtils";
 import {
   generateSong,
   generateScript,

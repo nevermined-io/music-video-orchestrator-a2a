@@ -5,7 +5,7 @@
  */
 
 import EventSource from "eventsource";
-import { Logger } from "./logger";
+import { Logger } from "../utils/logger";
 
 /**
  * Subscribes to task updates using Server-Sent Events (SSE)

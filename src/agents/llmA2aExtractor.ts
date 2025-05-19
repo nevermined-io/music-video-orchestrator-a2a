@@ -4,7 +4,7 @@
  */
 
 import { OPENAI_API_KEY } from "../config/env";
-import { Logger } from "../core/logger";
+import { Logger } from "../utils/logger";
 import { AgentCard } from "../types/AgentCard";
 
 /**
@@ -213,22 +213,19 @@ Your task is:
 1. Analyze all the skills described in the agent card.
 2. Select the most appropriate skill to use for the given user request and intent.
 3. Synthesize and adapt the user's original input so that it fits the context, purpose, and requirements of the selected skill. This means you must reinterpret or rewrite the user's request so it is directly actionable and relevant for the selected skill, using the skill's description as a guide. Be as specific and creative as needed, and focus only on what the agent can actually do.
-4. Generate the JSON parameters required to call that skill, using the adapted input. **You MUST include all required parameters defined in the agentCard for the selected skill. The 'message' field must be included at the top level, and all other parameters (besides 'message') must be placed inside the 'metadata' field of the JSON object.**
+4. Generate the JSON parameters required to call that skill, using the adapted input. **You MUST include all required parameters defined in the agentCard for the selected skill, in addition to the 'message' field.**
 5. Return ONLY the JSON object with the parameters, and nothing else after it. Do NOT include any code block markers (such as triple backticks or \`\`\`json), just the raw JSON object.
 6. If you believe any of the available parameters is more suitable for the message field, set it as the message field in the JSON object, instead of the original user input.
 7. Always ensure you construct the message field following the A2A protocol: { role: "user" | "agent", parts: [{ type: "text", text: ... }] }.
-8. Additional parameters should be added to the metadata field in the JSON object. If there are no additional parameters, the metadata field should be an empty object.
-9. Example output:
+8. Example output:
 {
   "message": {
     "role": "user",
     "parts": [{ "type": "text", "text": "your main input here" }]
   },
-  "metadata": {
-    "taskType": "text2image",
-    "duration": 10,
-    "imageUrls": ["https://example.com/image1.png"]
-  }
+  "taskType": "text2image",
+  "duration": 10,
+  "imageUrls": ["https://example.com/image1.png"]
 }
 
 Agent card:

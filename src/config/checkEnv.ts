@@ -4,7 +4,7 @@
  */
 
 import { EnvConfig, defaultConfig, requiredEnvVars } from "../config/env";
-import { Logger } from "../core/logger";
+import { Logger } from "../utils/logger";
 
 /**
  * @function validateEnv

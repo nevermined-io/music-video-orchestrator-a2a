@@ -10,6 +10,7 @@ import {
   llmExtractVideoUrl,
 } from "../agents/llmA2aExtractor";
 import { sendTask } from "../agents/a2aAgentClient";
+import { withRetry } from "../utils/retry";
 
 /**
  * Generates a song using the song generator agent.
@@ -25,10 +26,10 @@ export async function generateSong(
     agentCard: songAgentCard,
     availableData: input,
   });
-  const songResult = await sendTask(
-    "http://localhost:8001",
-    mappedParams,
-    songAgentCard
+  const songResult = await withRetry(
+    () => sendTask("http://localhost:8001", mappedParams, songAgentCard),
+    3,
+    2000
   );
   const { songUrl, title } = await llmExtractSongInfo(
     songAgentCard,
@@ -56,10 +57,11 @@ export async function generateScript(
       songResult,
     },
   });
-  return await sendTask(
-    "http://localhost:8002",
-    mappedScriptParams,
-    scriptAgentCard
+  return await withRetry(
+    () =>
+      sendTask("http://localhost:8002", mappedScriptParams, scriptAgentCard),
+    3,
+    2000
   );
 }
 
@@ -87,10 +89,10 @@ export async function generateCharacterImage(
       intent: "generate_image",
     },
   });
-  const result = await sendTask(
-    "http://localhost:8003",
-    params,
-    mediaAgentCard
+  const result = await withRetry(
+    () => sendTask("http://localhost:8003", params, mediaAgentCard),
+    3,
+    2000
   );
   const imageUrl = await llmExtractImageUrl(mediaAgentCard, result);
   return { name: character.name, imageUrl: imageUrl || "" };
@@ -120,10 +122,10 @@ export async function generateSettingImage(
       intent: "generate_image",
     },
   });
-  const result = await sendTask(
-    "http://localhost:8003",
-    params,
-    mediaAgentCard
+  const result = await withRetry(
+    () => sendTask("http://localhost:8003", params, mediaAgentCard),
+    3,
+    2000
   );
   const imageUrl = await llmExtractImageUrl(mediaAgentCard, result);
   return { name: setting.name, imageUrl: imageUrl || "" };
@@ -192,8 +194,7 @@ export async function generateVideoClips(
         ? generatedImages.settings.get(settingName)
         : "";
     const videoPrompt =
-      scene.visualPrompt ||
-      `A cinematic shot of ${scene.description || "the scene"}`;
+      scene.prompt || `A cinematic shot of ${scene.description || "the scene"}`;
     const params = await llmMapAgentParams({
       agentCard: mediaAgentCard,
       availableData: {
@@ -205,19 +206,20 @@ export async function generateVideoClips(
         characterImages: sceneCharacterImages,
         setting: settingName,
         settingImage,
+        duration: scene.duration,
         intent: "generate_video",
       },
     });
-    const result = await sendTask(
-      "http://localhost:8003",
-      params,
-      mediaAgentCard
+    const result = await withRetry(
+      () => sendTask("http://localhost:8003", params, mediaAgentCard),
+      3,
+      2000
     );
     const videoUrl = await llmExtractVideoUrl(mediaAgentCard, result);
     return videoUrl || null;
   }
   const videoClipResults = await Promise.all(
-    scenes.map((scene) => processScene(scene))
+    scenes.slice(0, 1).map((scene) => processScene(scene)) //TODO: Remove slice
   );
   return videoClipResults.filter((url) => !!url);
 }
