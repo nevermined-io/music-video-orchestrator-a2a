@@ -297,7 +297,6 @@ export class A2AController {
         metadata,
       };
       await this.taskStore.createTask(task);
-      await this.taskQueue.enqueueTask(task);
       // Notification mode: webhook or SSE
       const mode = notification?.mode || "sse";
       const eventTypes = notification?.eventTypes || [];
@@ -315,6 +314,8 @@ export class A2AController {
         taskId: task.id,
         eventTypes,
       });
+      // Enqueue the task for processing after subscribing SSE
+      this.taskQueue.enqueueTask(task);
     } catch (error) {
       ErrorHandler.handleHttpError(error as Error, res);
     }

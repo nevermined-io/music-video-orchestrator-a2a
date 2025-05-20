@@ -69,12 +69,12 @@ export async function generateScript(
  * Generates an image for a character using the media generator agent.
  * @param {any} mediaAgentCard - The agent card for the image/video generator.
  * @param {any} character - The character object.
- * @returns {Promise<{ name: string, imageUrl: string }>} - The character name and generated image URL.
+ * @returns {Promise<{ name: string, imageUrl: string, artifact?: any }>} - The character name, generated image URL, and original artifact.
  */
 export async function generateCharacterImage(
   mediaAgentCard: any,
   character: any
-): Promise<{ name: string; imageUrl: string }> {
+): Promise<{ name: string; imageUrl: string; artifact?: any }> {
   const characterPrompt =
     character.visualPrompt ||
     `Full body portrait of ${character.name}, ${character.description}, high quality, detailed, cinematic lighting`;
@@ -95,19 +95,23 @@ export async function generateCharacterImage(
     2000
   );
   const imageUrl = await llmExtractImageUrl(mediaAgentCard, result);
-  return { name: character.name, imageUrl: imageUrl || "" };
+  return {
+    name: character.name,
+    imageUrl: imageUrl || "",
+    artifact: Array.isArray(result.artifacts) ? result.artifacts[0] : undefined,
+  };
 }
 
 /**
  * Generates an image for a setting using the media generator agent.
  * @param {any} mediaAgentCard - The agent card for the image/video generator.
  * @param {any} setting - The setting object.
- * @returns {Promise<{ name: string, imageUrl: string }>} - The setting name and generated image URL.
+ * @returns {Promise<{ name: string, imageUrl: string, artifact?: any }>} - The setting name, generated image URL, and original artifact.
  */
 export async function generateSettingImage(
   mediaAgentCard: any,
   setting: any
-): Promise<{ name: string; imageUrl: string }> {
+): Promise<{ name: string; imageUrl: string; artifact?: any }> {
   const settingPrompt =
     setting.imagePrompt ||
     `Wide shot of ${setting.name}, ${setting.description}, cinematic, high quality, detailed`;
@@ -128,7 +132,11 @@ export async function generateSettingImage(
     2000
   );
   const imageUrl = await llmExtractImageUrl(mediaAgentCard, result);
-  return { name: setting.name, imageUrl: imageUrl || "" };
+  return {
+    name: setting.name,
+    imageUrl: imageUrl || "",
+    artifact: Array.isArray(result.artifacts) ? result.artifacts[0] : undefined,
+  };
 }
 
 /**
@@ -136,22 +144,31 @@ export async function generateSettingImage(
  * @param {any} mediaAgentCard - The agent card for the image/video generator.
  * @param {any[]} characters - Array of character objects.
  * @param {any[]} settings - Array of setting objects.
- * @returns {Promise<{ characters: Map<string, string>, settings: Map<string, string> }>} - Map of generated images for characters and settings.
+ * @returns {Promise<{ characters: Map<string, string>, settings: Map<string, string>, rawCharacterArtifacts: any[], rawSettingArtifacts: any[] }>} - Maps and original artifacts.
  */
 export async function generateCharacterAndSettingImages(
   mediaAgentCard: any,
   characters: any[],
   settings: any[]
-): Promise<{ characters: Map<string, string>; settings: Map<string, string> }> {
+): Promise<{
+  characters: Map<string, string>;
+  settings: Map<string, string>;
+  rawCharacterArtifacts: any[];
+  rawSettingArtifacts: any[];
+}> {
   const characterImages = new Map<string, string>();
   const settingImages = new Map<string, string>();
   const characterImageResults = await Promise.all(
-    characters.map((character) =>
-      generateCharacterImage(mediaAgentCard, character)
+    characters.slice(0, 1).map(
+      (
+        character // TODO: Remove slice
+      ) => generateCharacterImage(mediaAgentCard, character)
     )
   );
   const settingImageResults = await Promise.all(
-    settings.map((setting) => generateSettingImage(mediaAgentCard, setting))
+    settings
+      .slice(0, 1)
+      .map((setting) => generateSettingImage(mediaAgentCard, setting)) // TODO: Remove slice
   );
   for (const { name, imageUrl } of characterImageResults) {
     if (imageUrl) characterImages.set(name, imageUrl);
@@ -159,7 +176,16 @@ export async function generateCharacterAndSettingImages(
   for (const { name, imageUrl } of settingImageResults) {
     if (imageUrl) settingImages.set(name, imageUrl);
   }
-  return { characters: characterImages, settings: settingImages };
+  return {
+    characters: characterImages,
+    settings: settingImages,
+    rawCharacterArtifacts: characterImageResults
+      .map((r) => r.artifact)
+      .filter(Boolean),
+    rawSettingArtifacts: settingImageResults
+      .map((r) => r.artifact)
+      .filter(Boolean),
+  };
 }
 
 /**
@@ -167,7 +193,7 @@ export async function generateCharacterAndSettingImages(
  * @param {any} mediaAgentCard - The agent card for the image/video generator.
  * @param {any[]} scenes - Array of scene objects.
  * @param {{ characters: Map<string, string>, settings: Map<string, string> }} generatedImages - Map of generated images for characters and settings.
- * @returns {Promise<any[]>} - Array of generated video clips with their details.
+ * @returns {Promise<{ videoClips: string[], rawVideoArtifacts: any[] }>} - URLs and original artifacts.
  */
 export async function generateVideoClips(
   mediaAgentCard: any,
@@ -176,8 +202,10 @@ export async function generateVideoClips(
     characters: Map<string, string>;
     settings: Map<string, string>;
   }
-): Promise<any[]> {
-  async function processScene(scene: any): Promise<string | null> {
+): Promise<{ videoClips: string[]; rawVideoArtifacts: any[] }> {
+  async function processScene(
+    scene: any
+  ): Promise<{ url: string | null; artifact?: any }> {
     const sceneCharacters = scene.characters || [];
     const sceneCharacterImages: Record<string, string> = {};
     if (Array.isArray(sceneCharacters)) {
@@ -216,10 +244,18 @@ export async function generateVideoClips(
       2000
     );
     const videoUrl = await llmExtractVideoUrl(mediaAgentCard, result);
-    return videoUrl || null;
+    return {
+      url: videoUrl || null,
+      artifact: Array.isArray(result.artifacts)
+        ? result.artifacts[0]
+        : undefined,
+    };
   }
   const videoClipResults = await Promise.all(
-    scenes.map((scene) => processScene(scene))
+    scenes.slice(0, 1).map((scene) => processScene(scene)) // TODO: Remove slice
   );
-  return videoClipResults.filter((url) => !!url);
+  return {
+    videoClips: videoClipResults.map((r) => r.url).filter(Boolean) as string[],
+    rawVideoArtifacts: videoClipResults.map((r) => r.artifact).filter(Boolean),
+  };
 }

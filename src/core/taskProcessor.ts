@@ -23,30 +23,20 @@ export class TaskProcessor {
     try {
       Logger.info(`Processing task ${task.id}`);
       this.validateTask(task);
-      await this.updateTaskStatus(task, TaskState.WORKING, {
-        role: "agent",
-        parts: [{ type: "text", text: "Orchestrating music video..." }],
-      });
-      // Call the main orchestrator
+      // Progress callback to update task status after each orchestration step
+      const onProgress = async ({
+        state,
+        message,
+        artifacts,
+      }: {
+        state: TaskState;
+        message: any;
+        artifacts?: any[];
+      }) => {
+        await this.updateTaskStatus(task, state, message, artifacts);
+      };
       const prompt = task.message?.parts?.[0]?.text;
-      const orchestrationResult = await startOrchestration({ prompt });
-      // Save artifacts and result
-      await this.updateTaskStatus(
-        task,
-        TaskState.COMPLETED,
-        {
-          role: "agent",
-          parts: [
-            { type: "text", text: "Music video orchestration completed!" },
-          ],
-        },
-        [
-          {
-            name: "MusicVideoArtifacts.json",
-            parts: [{ type: "data", data: orchestrationResult }],
-          },
-        ]
-      );
+      await startOrchestration({ prompt }, onProgress);
     } catch (error) {
       Logger.error(
         `Error processing task ${task.id}: ${
