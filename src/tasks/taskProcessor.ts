@@ -58,17 +58,13 @@ export class TaskProcessor {
     try {
       Logger.info(`Processing task ${task.id}`);
       this.validateTask(task);
-      const prompt = task.message?.parts?.[0]?.text;
       const orchestrationIO =
         io ||
         new TaskProcessorOrchestrationIO(
           task,
           this.updateTaskStatus.bind(this)
         );
-      await startOrchestration(
-        { prompt, sessionId: task.sessionId },
-        orchestrationIO
-      );
+      await startOrchestration(task, orchestrationIO);
     } catch (error) {
       Logger.error(
         `Error processing task ${task.id}: ${

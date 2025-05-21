@@ -20,8 +20,252 @@ import {
 } from "./services/orchestrationTasks";
 import { uploadVideoToIPFS } from "./services/video/uploadVideoToIPFS";
 import fs from "fs";
-import { TaskState } from "./models/task";
+import { Task, TaskState } from "./models/task";
 import { OrchestrationIO } from "./interfaces/orchestrationIO";
+import { interpretUserFeedbackWithLLM } from "./llm/prompts";
+
+/**
+ * @enum OrchestrationStep
+ * @description Steps for the reentrant orchestration process.
+ */
+export enum OrchestrationStep {
+  GENERATE_SONG = "generate_song",
+  GENERATE_SCRIPT_AND_EXTRACT_ENTITIES = "generate_script_and_extract_entities",
+  GENERATE_IMAGES = "generate_images",
+  GENERATE_VIDEO_CLIPS = "generate_video_clips",
+  COMPILE_AND_UPLOAD_VIDEO = "compile_and_upload_video",
+  COMPLETED = "completed",
+  FAILED = "failed",
+}
+
+/**
+ * @function continueOrchestration
+ * @description Main entry point for reentrant orchestration. Calls the appropriate step based on metadata.currentStep.
+ * @param {Task} task - The orchestration task.
+ * @param {OrchestrationIO} io - The IO interface for progress and user input.
+ */
+export async function continueOrchestration(
+  task: Task,
+  io: OrchestrationIO
+): Promise<void> {
+  const step = task.metadata?.currentStep;
+  switch (step) {
+    case OrchestrationStep.GENERATE_SONG:
+      await stepGenerateSong(task, io);
+      break;
+    case OrchestrationStep.GENERATE_SCRIPT_AND_EXTRACT_ENTITIES:
+      await stepGenerateScriptAndExtractEntities(task, io);
+      break;
+      // case OrchestrationStep.GENERATE_IMAGES:
+      //   await stepGenerateImages(task, io);
+      //   break;
+      // case OrchestrationStep.GENERATE_VIDEO_CLIPS:
+      //   await stepGenerateVideoClips(task, io);
+      //   break;
+      // case OrchestrationStep.COMPILE_AND_UPLOAD_VIDEO:
+      //   await stepCompileAndUploadVideo(task, io);
+      //   break;
+      // case OrchestrationStep.COMPLETED:
+      //   await stepCompleted(task, io);
+      //   break;
+      // case OrchestrationStep.FAILED:
+      //   await stepFailed(task, io);
+      break;
+    default:
+      throw new Error(`Unknown orchestration step: ${step}`);
+  }
+}
+
+/**
+ * @function stepGenerateSong
+ * @description Generates the song and requests user feedback (pauses here until user input is received).
+ * @param {Task} task - The orchestration task.
+ * @param {OrchestrationIO} io - The IO interface for progress and user input.
+ */
+export async function stepGenerateSong(
+  task: Task,
+  io: OrchestrationIO
+): Promise<void> {
+  const songAgentCard = await fetchAgentCard("http://localhost:8001");
+  await io.onProgress({
+    state: TaskState.WORKING,
+    text: "Generating song...",
+    artifacts: [],
+    metadata: {
+      ...task.metadata,
+      currentStep: OrchestrationStep.GENERATE_SONG,
+    },
+  });
+
+  const { songResult, songUrl, title } = await generateSong(
+    songAgentCard,
+    task.message
+  );
+
+  Logger.info(
+    `[stepGenerateSong] Received song with url: ${songUrl} and title: ${title}`
+  );
+
+  // Notify the user that input is required
+  await io.onProgress({
+    state: TaskState.INPUT_REQUIRED,
+    text: "The song has been generated. Shall we move on to the next step or do you want some changes?",
+    artifacts: Array.isArray(songResult?.artifacts) ? songResult.artifacts : [],
+  });
+}
+
+/**
+ * @function stepGenerateScriptAndExtractEntities
+ * @description Generates the script and extracts characters, settings, and scenes.
+ * @param {Task} task - The orchestration task.
+ * @param {OrchestrationIO} io - The IO interface for progress and user input.
+ */
+export async function stepGenerateScriptAndExtractEntities(
+  task: Task,
+  io: OrchestrationIO
+): Promise<void> {
+  const scriptAgentCard = await fetchAgentCard("http://localhost:8002");
+
+  await io.onProgress({
+    state: TaskState.WORKING,
+    text: "Generating script...",
+    artifacts: [],
+  });
+
+  // Generate the script using the accepted song
+  const scriptResult = await generateScript(
+    scriptAgentCard,
+    task.message,
+    task.artifacts?.[0] // Use the accepted song
+  );
+
+  const scriptArtifacts = Array.isArray(scriptResult?.artifacts)
+    ? scriptResult.artifacts
+    : [];
+
+  await io.onProgress({
+    state: TaskState.WORKING,
+    text: "Script generated. Extracting characters, settings, and scenes...",
+    artifacts: scriptArtifacts,
+  });
+
+  // Extract entities in parallel
+  const [characters, settings, scenes] = await Promise.all([
+    extractCharacters(scriptAgentCard, scriptResult),
+    extractSettings(scriptAgentCard, scriptResult),
+    extractScenes(scriptAgentCard, scriptResult),
+  ]);
+
+  // Update task metadata and artifacts
+  task.metadata = {
+    ...task.metadata,
+    currentStep: OrchestrationStep.GENERATE_IMAGES,
+  };
+  task.artifacts = scriptArtifacts;
+
+  await io.onProgress({
+    state: TaskState.INPUT_REQUIRED,
+    text: `Extracted ${characters.length} characters, ${settings.length} settings, and ${scenes.length} scenes. Ready to generate images.`,
+    artifacts: scriptArtifacts,
+    metadata: {
+      ...task.metadata,
+      currentStep: OrchestrationStep.GENERATE_IMAGES,
+    },
+  });
+
+  // Aquí puedes llamar directamente al siguiente paso si no hay espera de usuario:
+  // await stepGenerateImages(task, io);
+}
+
+/**
+ * @function handleUserInput
+ * @description Handles user feedback after an INPUT_REQUIRED state, deciding whether to advance or repeat the current step using LLM interpretation.
+ * @param {Task} task - The orchestration task.
+ * @param {string} userInput - The user's feedback or instructions.
+ * @param {OrchestrationIO} io - The IO interface for progress and user input.
+ */
+export async function handleUserInput(
+  task: Task,
+  userInput: string,
+  io: OrchestrationIO
+): Promise<void> {
+  // Use LLM to interpret user feedback and decide next action
+  const userPromptMessage = task.status?.message?.parts?.[0]?.text || "";
+
+  // Select the correct agentCard based on the current step
+  let agentCard: any = {};
+  switch (task.metadata?.currentStep) {
+    case OrchestrationStep.GENERATE_SONG:
+      agentCard = await fetchAgentCard("http://localhost:8001");
+      break;
+    case OrchestrationStep.GENERATE_SCRIPT_AND_EXTRACT_ENTITIES:
+      agentCard = await fetchAgentCard("http://localhost:8002");
+      break;
+    case OrchestrationStep.GENERATE_IMAGES:
+    case OrchestrationStep.GENERATE_VIDEO_CLIPS:
+      agentCard = await fetchAgentCard("http://localhost:8003");
+      break;
+    default:
+      agentCard = {};
+  }
+
+  const feedback = await interpretUserFeedbackWithLLM({
+    previousInput: task.message,
+    previousOutput: task.artifacts,
+    userPromptMessage,
+    userComment: userInput,
+    agentCard,
+  });
+
+  switch (task.metadata?.currentStep) {
+    case OrchestrationStep.GENERATE_SONG:
+      if (feedback.action === "accept") {
+        // Advance to next step
+        task.metadata.currentStep =
+          OrchestrationStep.GENERATE_SCRIPT_AND_EXTRACT_ENTITIES;
+      } else if (feedback.action === "retry" || feedback.action === "modify") {
+        // Repeat the same step, update input if provided
+        if (feedback.newInput) {
+          task.message = feedback.newInput;
+        }
+        // currentStep remains the same
+      }
+      break;
+    // Add similar logic for other steps if needed
+    default:
+      // By default, advance to next step
+      break;
+  }
+
+  // Continue orchestration (onProgress will persist the task)
+  await continueOrchestration(task, io);
+}
+
+/**
+ * @function startOrchestration
+ * @description Starts the orchestration process for a music video.
+ * @param {object} input - The input data (e.g. { prompt: string })
+ * @param {OrchestrationIO} io - Communication interface for progress and user input
+ * @returns {Promise<any>} - The result of the workflow.
+ */
+export async function startOrchestration(
+  task: Task,
+  io: OrchestrationIO
+): Promise<any> {
+  Logger.info(
+    "[startOrchestration] Starting music video orchestration process"
+  );
+  await continueOrchestration(
+    {
+      ...task,
+      metadata: {
+        ...task.metadata,
+        currentStep: OrchestrationStep.GENERATE_SONG,
+      },
+    },
+    io
+  );
+}
 
 /**
  * Starts the orchestration process for a music video.
@@ -29,7 +273,7 @@ import { OrchestrationIO } from "./interfaces/orchestrationIO";
  * @param {OrchestrationIO} io - Communication interface for progress and user input
  * @returns {Promise<any>} - The result of the workflow.
  */
-export async function startOrchestration(
+export async function startOrchestration_old(
   input: { prompt: string; style?: string; sessionId?: string },
   io: OrchestrationIO
 ): Promise<any> {

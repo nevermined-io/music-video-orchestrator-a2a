@@ -51,23 +51,43 @@ export async function orchestrateMusicVideoWithWebSocket(params: {
     try {
       const parsed = JSON.parse(data.toString());
       console.log("[WS][event]", parsed);
-      // Extrae el result según la nueva convención
       const result = parsed?.result;
       const status = result?.status;
       const state = status?.state;
-      // Guarda el taskId si viene en el mensaje
+      // Read metadata from result or status
+      const metadata = result?.metadata || status?.metadata || {};
+      const currentStep = metadata.currentStep;
+
       if (result?.id) {
         lastTaskId = result.id;
       }
-      // Handle input-required events
-      if (state === "input-requireds") {
-        // Extrae el prompt del mensaje si existe
+
+      if (state === "input-required") {
+        // Generate feedback based on the currentStep
+        let userInput = "ok";
+        switch (currentStep) {
+          case "generate_song":
+            userInput = "Lyrics must be more catchy and engaging."; // Accept the song
+            break;
+          case "generate_script_and_extract_entities":
+            userInput = "ok"; // Accept the script and entities
+            break;
+          case "generate_images":
+            userInput = "The images must be more detailed and realistic.";
+            break;
+          case "generate_video_clips":
+            userInput =
+              "The video must be more engaging, with more action and drama.";
+            break;
+          default:
+            userInput = "ok";
+        }
+
         let promptMsg =
           status?.message?.parts?.[0]?.text ||
           "Input required. Please provide feedback (type and press Enter): ";
         console.log("[WS] Prompt shown to user:", promptMsg);
-        const userInput = await askUserInput("song");
-        // Send the user feedback back to the orchestrator
+
         const feedbackMsg = {
           jsonrpc: "2.0",
           id: uuidv4(),
@@ -84,7 +104,7 @@ export async function orchestrateMusicVideoWithWebSocket(params: {
         ws.send(JSON.stringify(feedbackMsg));
         console.log("[WS] Sent user feedback:", feedbackMsg);
       }
-      // Handle completion/exit
+
       if (
         state === "completed" ||
         state === "failed" ||
@@ -107,24 +127,6 @@ export async function orchestrateMusicVideoWithWebSocket(params: {
     console.error("[WS] Error:", err);
     process.exit(1);
   });
-}
-
-/**
- * Prompts the user for input via stdin
- * @param {string} prompt The prompt message
- * @returns {Promise<string>} The user input
- */
-function askUserInput(step: string): string {
-  if (step === "song") {
-    return "Verse must be shorter and more catchy, like a hymn.";
-  } else if (step === "script") {
-    return "The script must be more engaging, with more action and drama.";
-  } else if (step === "images") {
-    return "The images must be more detailed and realistic.";
-  } else if (step === "video") {
-    return "The video must be more engaging, with more action and drama.";
-  }
-  return "";
 }
 
 // Run the script if called directly

@@ -68,6 +68,10 @@ export class WebSocketOrchestrationIO implements OrchestrationIO {
       status: statusUpdate,
       artifacts: progress.artifacts || task.artifacts,
       history: [...(task.history || []), statusUpdate],
+      metadata: {
+        ...task.metadata,
+        ...progress.metadata,
+      },
     };
     await taskStore.updateTask(updatedTask);
   }

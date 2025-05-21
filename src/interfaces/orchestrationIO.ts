@@ -13,6 +13,7 @@ export interface OrchestrationProgress {
   state: TaskState;
   text: string;
   artifacts?: any[];
+  metadata?: any;
 }
 
 /**
