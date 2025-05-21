@@ -5,7 +5,7 @@
 
 import { Request, Response } from "express";
 import { Task, TaskState } from "../models/task";
-import { taskStore, taskProcessor, taskQueue } from "../tasks/taskContext";
+import { taskStore, taskQueue } from "../tasks/taskContext";
 import { ErrorHandler } from "../utils/errorHandler";
 import {
   PushNotificationService,

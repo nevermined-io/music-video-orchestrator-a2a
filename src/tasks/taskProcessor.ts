@@ -32,7 +32,7 @@ class TaskProcessorOrchestrationIO implements OrchestrationIO {
     );
   }
 
-  async onInputRequired(prompt: string, artifacts?: any[]): Promise<any> {
+  async onInputRequired(_prompt: string, _artifacts?: any[]): Promise<any> {
     throw new Error("User input is not supported in this context");
   }
 }

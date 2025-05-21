@@ -4,8 +4,7 @@
  * @module server
  */
 
-import express, { Request, Response } from "express";
-import { startOrchestration } from "./orchestrator";
+import express from "express";
 import a2aRoutes from "./routes/a2aRoutes";
 import { Logger } from "./utils/logger";
 import { getEnvConfig } from "./config/checkEnv";
@@ -34,25 +33,6 @@ app.use(
     res.status(500).json({ error: "Internal server error" });
   }
 );
-
-/**
- * POST /music-video
- * Starts the music video creation workflow.
- * Body: { prompt: string }
- */
-app.post("/music-video", async (req: Request, res: Response) => {
-  try {
-    const { prompt } = req.body;
-    if (!prompt) {
-      res.status(400).json({ error: "Missing prompt" });
-      return;
-    }
-    const result = await startOrchestration({ prompt });
-    res.json(result);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
 
 // Create HTTP server and integrate WebSocket upgrade
 const server = http.createServer(app);
