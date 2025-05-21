@@ -1,25 +1,10 @@
 /**
  * Helper utilities for extracting structured data from A2A agent results.
- * Delegates all LLM and prompt logic to llmA2aExtractor.ts.
+ * Delegates all LLM and prompt logic to a2aExtractor.ts.
  * @module agents/a2aResultExtractor
  */
 
-import { llmExtractAgentData } from "./llmA2aExtractor";
-
-/**
- * Extracts data from an A2A agent result using a flexible extraction goal.
- * @param {any} agentCard - The AgentCard describing the agent's output structure.
- * @param {any} agentResult - The actual result from the agent (output of sendTask).
- * @param {string} extractionGoal - A clear English description of what to extract.
- * @returns {Promise<any>} - The extracted data as a structured object.
- */
-export async function extractFromA2aResult(
-  agentCard: any,
-  agentResult: any,
-  extractionGoal: string
-): Promise<any> {
-  return llmExtractAgentData(agentCard, agentResult, extractionGoal);
-}
+import { extractAgentData } from "../llm/extractors";
 
 /**
  * Extracts all characters from a script agent result.
@@ -45,7 +30,7 @@ export async function extractCharacters(
   
   Return as an array of character objects.
   `;
-  return llmExtractAgentData(agentCard, agentResult, goal);
+  return extractAgentData(agentCard, agentResult, goal);
 }
 
 /**
@@ -69,7 +54,7 @@ export async function extractSettings(
     - The name must match the identifier used in the script for that location.
     Return as an array of unique setting/location objects.
     `;
-  return llmExtractAgentData(agentCard, agentResult, goal);
+  return extractAgentData(agentCard, agentResult, goal);
 }
 
 /**
@@ -99,5 +84,5 @@ export async function extractScenes(
   Return as an array of scene objects, with each scene containing at minimum: sceneNumber, description or prompt, characters (non-empty, matching the character list), setting (referencing the correct setting identifier), and duration (if available).
   `;
 
-  return llmExtractAgentData(agentCard, agentResult, goal);
+  return extractAgentData(agentCard, agentResult, goal);
 }

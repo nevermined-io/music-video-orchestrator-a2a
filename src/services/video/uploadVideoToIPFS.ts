@@ -1,7 +1,7 @@
 import fs from "fs";
 const pinataSDK = require("@pinata/sdk");
-import { Logger } from "../utils/logger";
-import { PINATA_API_KEY, PINATA_API_SECRET } from "../config/env";
+import { Logger } from "../../utils/logger";
+import { PINATA_API_KEY, PINATA_API_SECRET } from "../../config/env";
 
 const pinata = new pinataSDK({
   pinataApiKey: PINATA_API_KEY,

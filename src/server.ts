@@ -10,6 +10,8 @@ import a2aRoutes from "./routes/a2aRoutes";
 import { Logger } from "./utils/logger";
 import { getEnvConfig } from "./config/checkEnv";
 import cors from "cors";
+import { wss } from "./adapters/websocketService";
+import http from "http";
 
 const config = getEnvConfig();
 
@@ -52,7 +54,18 @@ app.post("/music-video", async (req: Request, res: Response) => {
   }
 });
 
-app.listen(config.PORT, config.HOST, () => {
+// Create HTTP server and integrate WebSocket upgrade
+const server = http.createServer(app);
+
+server.on("upgrade", (request, socket, head) => {
+  Logger.info("Upgrade request received");
+  // Handle WebSocket upgrade
+  wss.handleUpgrade(request, socket, head, (ws) => {
+    wss.emit("connection", ws, request);
+  });
+});
+
+server.listen(config.PORT, config.HOST, () => {
   Logger.info(`Server running at http://${config.HOST}:${config.PORT}`);
   Logger.info(`Environment: ${config.NODE_ENV}`);
   Logger.info(`Log level: ${config.LOG_LEVEL}`);

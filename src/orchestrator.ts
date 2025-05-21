@@ -10,30 +10,28 @@ import {
   extractScenes,
 } from "./agents/a2aResultExtractor";
 import { Logger } from "./utils/logger";
-import { compileMusicVideo } from "./utils/videoUtils";
+import { compileMusicVideo } from "./services/video/videoUtils";
 import {
   generateSong,
   generateScript,
   generateCharacterAndSettingImages,
   generateVideoClips,
 } from "./services/orchestrationTasks";
-import { uploadVideoToIPFS } from "./services/uploadVideoToIPFS";
+import { uploadVideoToIPFS } from "./services/video/uploadVideoToIPFS";
 import fs from "fs";
 import { TaskState } from "./models/task";
+import { interpretUserFeedbackWithLLM } from "./llm/prompts";
+import { OrchestrationIO } from "./interfaces/orchestrationIO";
 
 /**
  * Starts the orchestration process for a music video.
  * @param {object} input - The input data (e.g. { prompt: string })
- * @param {function} [onProgress] - Optional callback for progress updates
+ * @param {OrchestrationIO} io - Communication interface for progress and user input
  * @returns {Promise<any>} - The result of the workflow.
  */
 export async function startOrchestration(
-  input: { prompt: string },
-  onProgress?: (progress: {
-    state: TaskState;
-    message: any;
-    artifacts?: any[];
-  }) => Promise<void>
+  input: { prompt: string; style?: string; sessionId?: string },
+  io: OrchestrationIO
 ): Promise<any> {
   Logger.info(
     "[startOrchestration] Starting music video orchestration process"
@@ -43,45 +41,84 @@ export async function startOrchestration(
   const scriptAgentCard = await fetchAgentCard("http://localhost:8002");
   const mediaAgentCard = await fetchAgentCard("http://localhost:8003");
 
-  // Song generation
-  if (onProgress) {
-    await onProgress({
-      state: TaskState.WORKING,
-      message: {
-        role: "agent",
-        parts: [{ type: "text", text: "Generating song..." }],
-      },
-    });
-  }
-  const { songResult, songUrl, title } = await generateSong(
-    songAgentCard,
-    input
-  );
-  Logger.info(
-    `[startOrchestration] Received song with url: ${songUrl} and title: ${title}`
-  );
-  if (onProgress) {
+  // Song generation with user validation loop
+  let songAccepted = false;
+  let songResult, songUrl, title;
+  let currentInput: { prompt: string; style?: string } = { ...input };
+  const sessionId = input.sessionId;
+  while (!songAccepted) {
+    if (io) {
+      await io.onProgress({
+        state: TaskState.WORKING,
+        message: {
+          role: "agent",
+          parts: [{ type: "text", text: "Generating song..." }],
+        },
+      });
+    }
+    ({ songResult, songUrl, title } = await generateSong(
+      songAgentCard,
+      currentInput
+    ));
+    Logger.info(
+      `[startOrchestration] Received song with url: ${songUrl} and title: ${title}`
+    );
     const songArtifacts = Array.isArray(songResult?.artifacts)
       ? songResult.artifacts
       : [];
-    await onProgress({
-      state: TaskState.WORKING,
-      message: {
-        role: "agent",
-        parts: [
-          {
-            type: "text",
-            text: "Song generated. Proceeding to script creation...",
-          },
-        ],
-      },
-      ...(songArtifacts.length > 0 ? { artifacts: songArtifacts } : {}),
+    // Message shown to the user for feedback
+    const userPromptMessage =
+      "The song has been generated. Shall we move on to the next step or do you want some changes?";
+    if (io) {
+      await io.onProgress({
+        state: TaskState.INPUT_REQUIRED,
+        message: {
+          role: "agent",
+          parts: [
+            {
+              type: "text",
+              text: userPromptMessage,
+            },
+          ],
+        },
+        ...(songArtifacts.length > 0 ? { artifacts: songArtifacts } : {}),
+      });
+    }
+
+    if (!sessionId) {
+      throw new Error("sessionId is required for user feedback");
+    }
+
+    // Solicita input usando la interfaz
+    const userResponse = await io.onInputRequired(
+      userPromptMessage,
+      songArtifacts
+    );
+
+    const feedback = await interpretUserFeedbackWithLLM({
+      previousInput: currentInput,
+      previousOutput: songResult,
+      userPromptMessage,
+      userComment: userResponse,
+      agentCard: songAgentCard,
     });
+
+    if (feedback.action === "accept") {
+      songAccepted = true;
+    } else if (feedback.action === "retry") {
+      continue;
+    } else if (feedback.action === "modify" && feedback.newInput) {
+      currentInput = feedback.newInput;
+      continue;
+    } else {
+      // Fallback: accept
+      songAccepted = true;
+    }
   }
 
   // Script generation
-  if (onProgress) {
-    await onProgress({
+  if (io) {
+    await io.onProgress({
       state: TaskState.WORKING,
       message: {
         role: "agent",
@@ -91,11 +128,11 @@ export async function startOrchestration(
   }
   const scriptResult = await generateScript(scriptAgentCard, input, songResult);
   Logger.info("[startOrchestration] Received script generation result");
-  if (onProgress) {
+  if (io) {
     const scriptArtifacts = Array.isArray(scriptResult?.artifacts)
       ? scriptResult.artifacts
       : [];
-    await onProgress({
+    await io.onProgress({
       state: TaskState.WORKING,
       message: {
         role: "agent",
@@ -119,8 +156,8 @@ export async function startOrchestration(
   Logger.info(
     `[startOrchestration] Extracted ${characters.length} characters, ${settings.length} settings, and ${scenes.length} scenes`
   );
-  if (onProgress) {
-    await onProgress({
+  if (io) {
+    await io.onProgress({
       state: TaskState.WORKING,
       message: {
         role: "agent",
@@ -146,7 +183,7 @@ export async function startOrchestration(
   Logger.info(
     `[startOrchestration] Generated ${generatedImages.characters.size} character images and ${generatedImages.settings.size} setting images`
   );
-  if (onProgress) {
+  if (io) {
     // Extrae artifacts de cada resultado de imagen si existen (solo de la raíz)
     const imageArtifacts = [
       ...(generatedImages.rawCharacterArtifacts
@@ -156,7 +193,7 @@ export async function startOrchestration(
         ?.map((a) => (Array.isArray(a?.artifacts) ? a.artifacts[0] : null))
         .filter(Boolean) || []),
     ];
-    await onProgress({
+    await io.onProgress({
       state: TaskState.WORKING,
       message: {
         role: "agent",
@@ -178,12 +215,12 @@ export async function startOrchestration(
   Logger.info(
     `[startOrchestration] Generated ${videoClipsResult.videoClips.length} video clips`
   );
-  if (onProgress) {
+  if (io) {
     // Extrae artifacts de cada resultado de clip si existen (solo de la raíz)
     const videoArtifacts = (videoClipsResult.rawVideoArtifacts || [])
       .map((a) => (Array.isArray(a?.artifacts) ? a.artifacts[0] : null))
       .filter(Boolean);
-    await onProgress({
+    await io.onProgress({
       state: TaskState.WORKING,
       message: {
         role: "agent",
@@ -217,8 +254,8 @@ export async function startOrchestration(
     );
     // Clean up local file
     fs.unlinkSync(finalVideoPath);
-    if (onProgress) {
-      await onProgress({
+    if (io) {
+      await io.onProgress({
         state: TaskState.COMPLETED,
         message: {
           role: "agent",
@@ -244,8 +281,8 @@ export async function startOrchestration(
     Logger.warn(
       "[startOrchestration] Skipping final compilation: missing video clips or song URL"
     );
-    if (onProgress) {
-      await onProgress({
+    if (io) {
+      await io.onProgress({
         state: TaskState.FAILED,
         message: {
           role: "agent",

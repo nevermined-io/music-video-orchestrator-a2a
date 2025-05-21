@@ -4,11 +4,11 @@
  */
 
 import {
-  llmMapAgentParams,
   llmExtractSongInfo,
   llmExtractImageUrl,
   llmExtractVideoUrl,
-} from "../agents/llmA2aExtractor";
+} from "../llm/extractors";
+import { llmMapAgentParams } from "../llm/mapping";
 import { sendTask } from "../agents/a2aAgentClient";
 import { withRetry } from "../utils/retry";
 

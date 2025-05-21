@@ -4,9 +4,38 @@
  */
 
 import { Task, TaskState } from "../models/task";
-import { TaskStore } from "./taskStore";
+import { TaskStore } from "../store/taskStore";
 import { startOrchestration } from "../orchestrator";
 import { Logger } from "../utils/logger";
+import { OrchestrationIO } from "../interfaces/orchestrationIO";
+
+/**
+ * @class TaskProcessorOrchestrationIO
+ * @description Implements OrchestrationIO for TaskProcessor, updating task status and not supporting user input.
+ */
+class TaskProcessorOrchestrationIO implements OrchestrationIO {
+  constructor(
+    private task: Task,
+    private updateTaskStatus: TaskProcessor["updateTaskStatus"]
+  ) {}
+
+  async onProgress(progress: {
+    state: TaskState;
+    message: any;
+    artifacts?: any[];
+  }): Promise<void> {
+    await this.updateTaskStatus(
+      this.task,
+      progress.state,
+      progress.message,
+      progress.artifacts
+    );
+  }
+
+  async onInputRequired(prompt: string, artifacts?: any[]): Promise<any> {
+    throw new Error("User input is not supported in this context");
+  }
+}
 
 /**
  * @class TaskProcessor
@@ -23,20 +52,12 @@ export class TaskProcessor {
     try {
       Logger.info(`Processing task ${task.id}`);
       this.validateTask(task);
-      // Progress callback to update task status after each orchestration step
-      const onProgress = async ({
-        state,
-        message,
-        artifacts,
-      }: {
-        state: TaskState;
-        message: any;
-        artifacts?: any[];
-      }) => {
-        await this.updateTaskStatus(task, state, message, artifacts);
-      };
       const prompt = task.message?.parts?.[0]?.text;
-      await startOrchestration({ prompt }, onProgress);
+      const io = new TaskProcessorOrchestrationIO(
+        task,
+        this.updateTaskStatus.bind(this)
+      );
+      await startOrchestration({ prompt }, io);
     } catch (error) {
       Logger.error(
         `Error processing task ${task.id}: ${

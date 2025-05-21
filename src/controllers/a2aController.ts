@@ -5,15 +5,13 @@
 
 import { Request, Response } from "express";
 import { Task, TaskState } from "../models/task";
-import { TaskStore } from "../core/taskStore";
+import { taskStore, taskProcessor, taskQueue } from "../tasks/taskContext";
 import { ErrorHandler } from "../utils/errorHandler";
-import { TaskProcessor } from "../core/taskProcessor";
-import { TaskQueue } from "../core/taskQueue";
 import {
   PushNotificationService,
   PushNotificationEvent,
-} from "../services/pushNotificationService";
-import { StreamingService } from "../services/streamingService";
+} from "../adapters/pushNotificationService";
+import { StreamingService } from "../adapters/streamingService";
 import { v4 as uuidv4 } from "uuid";
 import { A2AEventType } from "../models/a2aEventType";
 
@@ -22,20 +20,12 @@ import { A2AEventType } from "../models/a2aEventType";
  * @description Controls and manages A2A interactions and task processing
  */
 export class A2AController {
-  private taskStore: TaskStore;
-  private taskProcessor: TaskProcessor;
-  private taskQueue: TaskQueue;
+  private taskStore = taskStore;
+  private taskQueue = taskQueue;
   private pushNotificationService: PushNotificationService;
   private streamingService: StreamingService;
 
   constructor() {
-    this.taskStore = new TaskStore();
-    this.taskProcessor = new TaskProcessor(this.taskStore);
-    this.taskQueue = new TaskQueue(this.taskProcessor, {
-      maxConcurrent: 2,
-      maxRetries: 3,
-      retryDelay: 1000,
-    });
     this.pushNotificationService = new PushNotificationService();
     this.streamingService = new StreamingService();
     this.taskStore.addStatusListener(async (task: Task) => {
