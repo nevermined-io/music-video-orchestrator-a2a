@@ -1,5 +1,6 @@
 /**
  * Orchestrates the music video creation workflow.
+ * This module is decoupled from protocol-specific message structures; it uses domain models for progress and input.
  * @module orchestrator
  */
 
@@ -20,7 +21,6 @@ import {
 import { uploadVideoToIPFS } from "./services/video/uploadVideoToIPFS";
 import fs from "fs";
 import { TaskState } from "./models/task";
-import { interpretUserFeedbackWithLLM } from "./llm/prompts";
 import { OrchestrationIO } from "./interfaces/orchestrationIO";
 
 /**
@@ -45,17 +45,12 @@ export async function startOrchestration(
   let songAccepted = false;
   let songResult, songUrl, title;
   let currentInput: { prompt: string; style?: string } = { ...input };
-  const sessionId = input.sessionId;
   while (!songAccepted) {
-    if (io) {
-      await io.onProgress({
-        state: TaskState.WORKING,
-        message: {
-          role: "agent",
-          parts: [{ type: "text", text: "Generating song..." }],
-        },
-      });
-    }
+    await io.onProgress({
+      state: TaskState.WORKING,
+      text: "Generating song...",
+      artifacts: [],
+    });
     ({ songResult, songUrl, title } = await generateSong(
       songAgentCard,
       currentInput
@@ -69,83 +64,32 @@ export async function startOrchestration(
     // Message shown to the user for feedback
     const userPromptMessage =
       "The song has been generated. Shall we move on to the next step or do you want some changes?";
-    if (io) {
-      await io.onProgress({
-        state: TaskState.INPUT_REQUIRED,
-        message: {
-          role: "agent",
-          parts: [
-            {
-              type: "text",
-              text: userPromptMessage,
-            },
-          ],
-        },
-        ...(songArtifacts.length > 0 ? { artifacts: songArtifacts } : {}),
-      });
-    }
 
-    if (!sessionId) {
-      throw new Error("sessionId is required for user feedback");
-    }
-
-    // Solicita input usando la interfaz
-    const userResponse = await io.onInputRequired(
-      userPromptMessage,
-      songArtifacts
-    );
-
-    const feedback = await interpretUserFeedbackWithLLM({
-      previousInput: currentInput,
-      previousOutput: songResult,
-      userPromptMessage,
-      userComment: userResponse,
-      agentCard: songAgentCard,
+    // Notify that user input is required
+    await io.onProgress({
+      state: TaskState.INPUT_REQUIRED,
+      text: userPromptMessage,
+      artifacts: songArtifacts,
     });
-
-    if (feedback.action === "accept") {
-      songAccepted = true;
-    } else if (feedback.action === "retry") {
-      continue;
-    } else if (feedback.action === "modify" && feedback.newInput) {
-      currentInput = feedback.newInput;
-      continue;
-    } else {
-      // Fallback: accept
-      songAccepted = true;
-    }
+    return;
   }
 
   // Script generation
-  if (io) {
-    await io.onProgress({
-      state: TaskState.WORKING,
-      message: {
-        role: "agent",
-        parts: [{ type: "text", text: "Generating script..." }],
-      },
-    });
-  }
+  await io.onProgress({
+    state: TaskState.WORKING,
+    text: "Generating script...",
+    artifacts: [],
+  });
   const scriptResult = await generateScript(scriptAgentCard, input, songResult);
   Logger.info("[startOrchestration] Received script generation result");
-  if (io) {
-    const scriptArtifacts = Array.isArray(scriptResult?.artifacts)
-      ? scriptResult.artifacts
-      : [];
-    await io.onProgress({
-      state: TaskState.WORKING,
-      message: {
-        role: "agent",
-        parts: [
-          {
-            type: "text",
-            text: "Script generated. Extracting characters, settings, and scenes...",
-          },
-        ],
-      },
-      ...(scriptArtifacts.length > 0 ? { artifacts: scriptArtifacts } : {}),
-    });
-  }
+  const scriptArtifacts = Array.isArray(scriptResult?.artifacts)
+    ? scriptResult.artifacts
+    : [];
+  await io.onProgress({
+    state: TaskState.WORKING,
+    text: "Script generated. Extracting characters, settings, and scenes...",
+    artifacts: scriptArtifacts,
+  });
 
   // Extraction
   const [characters, settings, scenes] = await Promise.all([
@@ -156,20 +100,11 @@ export async function startOrchestration(
   Logger.info(
     `[startOrchestration] Extracted ${characters.length} characters, ${settings.length} settings, and ${scenes.length} scenes`
   );
-  if (io) {
-    await io.onProgress({
-      state: TaskState.WORKING,
-      message: {
-        role: "agent",
-        parts: [
-          {
-            type: "text",
-            text: `Extracted ${characters.length} characters, ${settings.length} settings, and ${scenes.length} scenes. Generating images...`,
-          },
-        ],
-      },
-    });
-  }
+  await io.onProgress({
+    state: TaskState.WORKING,
+    text: `Extracted ${characters.length} characters, ${settings.length} settings, and ${scenes.length} scenes. Generating images...`,
+    artifacts: [],
+  });
 
   // Image generation
   Logger.info(
@@ -183,27 +118,20 @@ export async function startOrchestration(
   Logger.info(
     `[startOrchestration] Generated ${generatedImages.characters.size} character images and ${generatedImages.settings.size} setting images`
   );
-  if (io) {
-    // Extrae artifacts de cada resultado de imagen si existen (solo de la raíz)
-    const imageArtifacts = [
-      ...(generatedImages.rawCharacterArtifacts
-        ?.map((a) => (Array.isArray(a?.artifacts) ? a.artifacts[0] : null))
-        .filter(Boolean) || []),
-      ...(generatedImages.rawSettingArtifacts
-        ?.map((a) => (Array.isArray(a?.artifacts) ? a.artifacts[0] : null))
-        .filter(Boolean) || []),
-    ];
-    await io.onProgress({
-      state: TaskState.WORKING,
-      message: {
-        role: "agent",
-        parts: [
-          { type: "text", text: "Images generated. Generating video clips..." },
-        ],
-      },
-      ...(imageArtifacts.length > 0 ? { artifacts: imageArtifacts } : {}),
-    });
-  }
+  // Extrae artifacts de cada resultado de imagen si existen (solo de la raíz)
+  const imageArtifacts = [
+    ...(generatedImages.rawCharacterArtifacts
+      ?.map((a) => (Array.isArray(a?.artifacts) ? a.artifacts[0] : null))
+      .filter(Boolean) || []),
+    ...(generatedImages.rawSettingArtifacts
+      ?.map((a) => (Array.isArray(a?.artifacts) ? a.artifacts[0] : null))
+      .filter(Boolean) || []),
+  ];
+  await io.onProgress({
+    state: TaskState.WORKING,
+    text: "Images generated. Generating video clips...",
+    artifacts: imageArtifacts,
+  });
 
   // Video clips generation
   Logger.info("[startOrchestration] Generating video clips for each scene");
@@ -215,25 +143,15 @@ export async function startOrchestration(
   Logger.info(
     `[startOrchestration] Generated ${videoClipsResult.videoClips.length} video clips`
   );
-  if (io) {
-    // Extrae artifacts de cada resultado de clip si existen (solo de la raíz)
-    const videoArtifacts = (videoClipsResult.rawVideoArtifacts || [])
-      .map((a) => (Array.isArray(a?.artifacts) ? a.artifacts[0] : null))
-      .filter(Boolean);
-    await io.onProgress({
-      state: TaskState.WORKING,
-      message: {
-        role: "agent",
-        parts: [
-          {
-            type: "text",
-            text: "Video clips generated. Compiling final video...",
-          },
-        ],
-      },
-      ...(videoArtifacts.length > 0 ? { artifacts: videoArtifacts } : {}),
-    });
-  }
+  // Extrae artifacts de cada resultado de clip si existen (solo de la raíz)
+  const videoArtifacts = (videoClipsResult.rawVideoArtifacts || [])
+    .map((a) => (Array.isArray(a?.artifacts) ? a.artifacts[0] : null))
+    .filter(Boolean);
+  await io.onProgress({
+    state: TaskState.WORKING,
+    text: "Video clips generated. Compiling final video...",
+    artifacts: videoArtifacts,
+  });
 
   // Final video compilation
   Logger.info("[startOrchestration] Compiling final music video with audio");
@@ -254,47 +172,31 @@ export async function startOrchestration(
     );
     // Clean up local file
     fs.unlinkSync(finalVideoPath);
-    if (io) {
-      await io.onProgress({
-        state: TaskState.COMPLETED,
-        message: {
-          role: "agent",
+    await io.onProgress({
+      state: TaskState.COMPLETED,
+      text: "Music video orchestration completed!",
+      artifacts: [
+        {
+          name: "FinalVideo",
           parts: [
-            { type: "text", text: "Music video orchestration completed!" },
+            {
+              type: "video",
+              url: finalVideoIpfsUrl,
+              description: "Final music video (IPFS)",
+            },
           ],
         },
-        artifacts: [
-          {
-            name: "FinalVideo",
-            parts: [
-              {
-                type: "video",
-                url: finalVideoIpfsUrl,
-                description: "Final music video (IPFS)",
-              },
-            ],
-          },
-        ],
-      });
-    }
+      ],
+    });
   } else {
     Logger.warn(
       "[startOrchestration] Skipping final compilation: missing video clips or song URL"
     );
-    if (io) {
-      await io.onProgress({
-        state: TaskState.FAILED,
-        message: {
-          role: "agent",
-          parts: [
-            {
-              type: "text",
-              text: "Failed to compile final video: missing video clips or song URL.",
-            },
-          ],
-        },
-      });
-    }
+    await io.onProgress({
+      state: TaskState.FAILED,
+      text: "Failed to compile final video: missing video clips or song URL.",
+      artifacts: [],
+    });
   }
 
   // Return the complete result with extracted data and generated media

@@ -10,7 +10,7 @@ import { TaskQueue } from "./taskQueue";
 export const taskStore = new TaskStore();
 export const taskProcessor = new TaskProcessor(taskStore);
 export const taskQueue = new TaskQueue(taskProcessor, {
-  maxConcurrent: 2,
+  maxConcurrent: 10,
   maxRetries: 3,
   retryDelay: 1000,
 });

@@ -7,7 +7,10 @@ import { Task, TaskState } from "../models/task";
 import { TaskStore } from "../store/taskStore";
 import { startOrchestration } from "../orchestrator";
 import { Logger } from "../utils/logger";
-import { OrchestrationIO } from "../interfaces/orchestrationIO";
+import {
+  OrchestrationIO,
+  OrchestrationProgress,
+} from "../interfaces/orchestrationIO";
 
 /**
  * @class TaskProcessorOrchestrationIO
@@ -19,15 +22,16 @@ class TaskProcessorOrchestrationIO implements OrchestrationIO {
     private updateTaskStatus: TaskProcessor["updateTaskStatus"]
   ) {}
 
-  async onProgress(progress: {
-    state: TaskState;
-    message: any;
-    artifacts?: any[];
-  }): Promise<void> {
+  /**
+   * @method onProgress
+   * @description Handles progress updates using the domain model and translates to protocol message structure.
+   * @param {OrchestrationProgress} progress - The progress update.
+   */
+  async onProgress(progress: OrchestrationProgress): Promise<void> {
     await this.updateTaskStatus(
       this.task,
       progress.state,
-      progress.message,
+      { role: "agent", parts: [{ type: "text", text: progress.text }] },
       progress.artifacts
     );
   }
@@ -47,17 +51,24 @@ export class TaskProcessor {
   /**
    * @method processTask
    * @description Process a single task: validate, update status, run orchestration, handle errors
+   * @param {Task} task - The task to process.
+   * @param {OrchestrationIO} [io] - Optional IO implementation (WebSocket, HTTP, etc.)
    */
-  public async processTask(task: Task): Promise<void> {
+  public async processTask(task: Task, io?: OrchestrationIO): Promise<void> {
     try {
       Logger.info(`Processing task ${task.id}`);
       this.validateTask(task);
       const prompt = task.message?.parts?.[0]?.text;
-      const io = new TaskProcessorOrchestrationIO(
-        task,
-        this.updateTaskStatus.bind(this)
+      const orchestrationIO =
+        io ||
+        new TaskProcessorOrchestrationIO(
+          task,
+          this.updateTaskStatus.bind(this)
+        );
+      await startOrchestration(
+        { prompt, sessionId: task.sessionId },
+        orchestrationIO
       );
-      await startOrchestration({ prompt }, io);
     } catch (error) {
       Logger.error(
         `Error processing task ${task.id}: ${

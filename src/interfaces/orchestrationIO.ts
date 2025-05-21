@@ -3,26 +3,27 @@
  * @description Interface for orchestration input/output communication.
  */
 
+import { TaskState } from "../models/task";
+
+/**
+ * @interface OrchestrationProgress
+ * @description Domain model for orchestration progress updates.
+ */
+export interface OrchestrationProgress {
+  state: TaskState;
+  text: string;
+  artifacts?: any[];
+}
+
 /**
  * @interface OrchestrationIO
- * @description Interface for orchestration input/output communication.
+ * @description Interface for orchestration communication (progress and user input).
  */
 export interface OrchestrationIO {
   /**
-   * Notifies progress to the user.
-   * @param progress - Progress data
+   * @method onProgress
+   * @description Handle a progress update in the orchestration workflow.
+   * @param {OrchestrationProgress} progress - The progress update.
    */
-  onProgress(progress: {
-    state: string;
-    message: any;
-    artifacts?: any[];
-  }): Promise<void>;
-
-  /**
-   * Requests input from the user and waits for a response.
-   * @param prompt - The message to show to the user
-   * @param artifacts - Optional artifacts to show
-   * @returns The user's response
-   */
-  onInputRequired(prompt: string, artifacts?: any[]): Promise<any>;
+  onProgress(progress: OrchestrationProgress): Promise<void>;
 }

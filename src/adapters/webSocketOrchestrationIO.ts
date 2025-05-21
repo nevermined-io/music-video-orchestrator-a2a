@@ -3,10 +3,13 @@
  * @description OrchestrationIO implementation for WebSocket communication with the user.
  */
 
-import { OrchestrationIO } from "../interfaces/orchestrationIO";
-import { sendToUser } from "./websocketService";
-import { waitForUserInput } from "../store/userInputWaitStore";
+import {
+  OrchestrationIO,
+  OrchestrationProgress,
+} from "../interfaces/orchestrationIO";
 import { TaskState } from "../models/task";
+import { taskStore } from "../tasks/taskContext";
+import { v4 as uuidv4 } from "uuid";
 
 /**
  * @typedef {object} ProgressUpdate
@@ -26,43 +29,46 @@ export interface ProgressUpdate {
  * @description Handles progress and input requests via WebSocket for a given session.
  */
 export class WebSocketOrchestrationIO implements OrchestrationIO {
-  private sessionId: string;
+  private taskId: string;
 
   /**
    * @constructor
-   * @param {string} sessionId - The session identifier for the user connection.
+   * @param {string} taskId - The task identifier for the current session.
    */
-  constructor(sessionId: string) {
-    this.sessionId = sessionId;
+  constructor(taskId: string) {
+    this.taskId = taskId;
   }
 
   /**
    * @method onProgress
-   * @description Sends progress updates to the user via WebSocket.
-   * @param {ProgressUpdate} progress - Progress information (state, message, artifacts).
+   * @description Sends progress updates to the user via WebSocket using JSON-RPC
+   * @param {OrchestrationProgress} progress - Progress information to send.
    */
-  async onProgress(progress: ProgressUpdate): Promise<void> {
-    sendToUser(this.sessionId, {
-      type: "progress",
+  async onProgress(progress: OrchestrationProgress): Promise<void> {
+    const task = await taskStore.getTask(this.taskId);
+    if (!task) return;
+    const statusUpdate = {
       state: progress.state,
-      message: progress.message,
-      artifacts: progress.artifacts,
-    });
-  }
-
-  /**
-   * @method onInputRequired
-   * @description Sends an input request to the user and waits for their response via WebSocket.
-   * @param {string} prompt - The prompt/question for the user.
-   * @param {any[]} [artifacts] - Optional artifacts to send with the prompt.
-   * @returns {Promise<any>} - Resolves with the user's input.
-   */
-  async onInputRequired(prompt: string, artifacts?: any[]): Promise<any> {
-    sendToUser(this.sessionId, {
-      type: "input_required",
-      prompt,
-      artifacts,
-    });
-    return await waitForUserInput(this.sessionId);
+      timestamp: new Date().toISOString(),
+      message: progress.text
+        ? {
+            role: "agent",
+            parts: [
+              {
+                type: "text",
+                text: progress.text,
+              },
+            ],
+            messageId: uuidv4(),
+          }
+        : undefined,
+    };
+    const updatedTask = {
+      ...task,
+      status: statusUpdate,
+      artifacts: progress.artifacts || task.artifacts,
+      history: [...(task.history || []), statusUpdate],
+    };
+    await taskStore.updateTask(updatedTask);
   }
 }

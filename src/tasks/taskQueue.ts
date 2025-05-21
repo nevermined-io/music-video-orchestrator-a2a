@@ -6,6 +6,7 @@
 import { Task } from "../models/task";
 import { TaskProcessor } from "./taskProcessor";
 import { Logger } from "../utils/logger";
+import { OrchestrationIO } from "../interfaces/orchestrationIO";
 
 /**
  * @interface QueueConfig
@@ -38,6 +39,10 @@ export class TaskQueue {
   private failed: Set<string> = new Set();
   private completed: Set<string> = new Set();
   private retryCount: Map<string, number> = new Map();
+  /**
+   * Stores custom IO implementations for tasks by taskId
+   */
+  private ioMap: Map<string, OrchestrationIO> = new Map();
 
   constructor(
     private taskProcessor: TaskProcessor,
@@ -50,15 +55,19 @@ export class TaskQueue {
 
   /**
    * @method enqueueTask
-   * @description Add a task to the queue
+   * @description Add a task to the queue, optionally with a custom IO implementation
+   * @param {Task} task - The task to enqueue
+   * @param {OrchestrationIO} [io] - Optional IO implementation for this task
    */
-  public async enqueueTask(task: Task): Promise<void> {
+  public async enqueueTask(task: Task, io?: OrchestrationIO): Promise<void> {
     try {
       if (!task?.id) {
         throw new Error("Invalid task: missing task ID");
       }
-
       Logger.info(`Enqueueing task ${task.id}`);
+      if (io) {
+        this.ioMap.set(task.id, io);
+      }
       this.queue.push(task);
       await this.processNextTasks();
     } catch (error) {
@@ -106,7 +115,10 @@ export class TaskQueue {
    */
   private async processTask(task: Task): Promise<void> {
     try {
-      await this.taskProcessor.processTask(task);
+      // Use custom IO if present, otherwise default
+      const io = this.ioMap.get(task.id);
+      await this.taskProcessor.processTask(task, io);
+      this.ioMap.delete(task.id);
       this.processing.delete(task.id);
       this.completed.add(task.id);
       Logger.info(`Task ${task.id} completed successfully`);
@@ -137,6 +149,7 @@ export class TaskQueue {
         Logger.error(
           `Task ${task.id} failed after ${this.config.maxRetries} retries`
         );
+        this.ioMap.delete(task.id);
         this.processing.delete(task.id);
         this.failed.add(task.id);
         await this.processNextTasks();

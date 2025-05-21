@@ -5,7 +5,7 @@
 
 import { Request, Response } from "express";
 import { Task, TaskState } from "../models/task";
-import { taskStore, taskQueue } from "../tasks/taskContext";
+import { taskStore, taskProcessor, taskQueue } from "../tasks/taskContext";
 import { ErrorHandler } from "../utils/errorHandler";
 import {
   PushNotificationService,
@@ -221,19 +221,22 @@ export class A2AController {
         });
         return;
       }
+      const initialStatus = {
+        state: TaskState.SUBMITTED,
+        timestamp: new Date().toISOString(),
+      };
       const task: Task = {
         id: uuidv4(),
         sessionId,
-        status: {
-          state: TaskState.SUBMITTED,
-          timestamp: new Date().toISOString(),
-        },
+        status: initialStatus,
         message,
         metadata,
+        history: [initialStatus],
       };
       await this.taskStore.createTask(task);
-      // Enqueue the task for processing using TaskQueue
-      await this.taskQueue.enqueueTask(task);
+      // Always use the default IO (TaskProcessorOrchestrationIO) for A2A tasks.
+      // This ensures no human-in-the-loop and follows the A2A protocol (HTTP/JSON-RPC/SSE/webhook only).
+      await taskProcessor.processTask(task);
       // Respond with the initial task object (status will be updated asynchronously)
       res.json({ jsonrpc: "2.0", id, result: task });
     } catch (error) {
@@ -276,15 +279,17 @@ export class A2AController {
         });
         return;
       }
+      const initialStatus = {
+        state: TaskState.SUBMITTED,
+        timestamp: new Date().toISOString(),
+      };
       const task: Task = {
         id: uuidv4(),
         sessionId,
-        status: {
-          state: TaskState.SUBMITTED,
-          timestamp: new Date().toISOString(),
-        },
+        status: initialStatus,
         message,
         metadata,
+        history: [initialStatus],
       };
       await this.taskStore.createTask(task);
       // Notification mode: webhook or SSE

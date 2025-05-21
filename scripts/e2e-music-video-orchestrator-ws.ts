@@ -27,6 +27,8 @@ export async function orchestrateMusicVideoWithWebSocket(params: {
   const sessionId = params.sessionId || uuidv4();
   const ws = new WebSocket(`${CONFIG.wsUrl}?sessionId=${sessionId}`);
 
+  let lastTaskId: string | undefined;
+
   ws.on("open", () => {
     // Send the initial orchestration request as a JSON-RPC message
     const message = {
@@ -49,30 +51,44 @@ export async function orchestrateMusicVideoWithWebSocket(params: {
     try {
       const parsed = JSON.parse(data.toString());
       console.log("[WS][event]", parsed);
-      // Handle input-required events
-      if (
-        parsed?.type === "input-required" ||
-        parsed?.data?.status?.state === "input-required"
-      ) {
-        // Show the message to the user and wait for input
-        const promptMsg =
-          parsed.message ||
-          parsed.data?.message ||
-          "Input required. Please provide feedback (type and press Enter): ";
-        const userInput = await askUserInput(promptMsg);
-        // Send the user feedback back to the orchestrator
-        ws.send(JSON.stringify({ sessionId, input: userInput }));
-        console.log("[WS] Sent user feedback:", userInput);
+      // Extrae el result según la nueva convención
+      const result = parsed?.result;
+      const status = result?.status;
+      const state = status?.state;
+      // Guarda el taskId si viene en el mensaje
+      if (result?.id) {
+        lastTaskId = result.id;
       }
-      // Optionally handle completion/exit
-      const state =
-        parsed?.data?.status?.state || parsed?.result?.status?.state;
+      // Handle input-required events
+      if (state === "input-requireds") {
+        // Extrae el prompt del mensaje si existe
+        let promptMsg =
+          status?.message?.parts?.[0]?.text ||
+          "Input required. Please provide feedback (type and press Enter): ";
+        console.log("[WS] Prompt shown to user:", promptMsg);
+        const userInput = await askUserInput("song");
+        // Send the user feedback back to the orchestrator
+        const feedbackMsg = {
+          jsonrpc: "2.0",
+          id: uuidv4(),
+          method: "tasks/send",
+          params: {
+            sessionId,
+            message: {
+              role: "user",
+              parts: [{ type: "text", text: userInput }],
+              ...(lastTaskId ? { taskId: lastTaskId } : {}),
+            },
+          },
+        };
+        ws.send(JSON.stringify(feedbackMsg));
+        console.log("[WS] Sent user feedback:", feedbackMsg);
+      }
+      // Handle completion/exit
       if (
         state === "completed" ||
         state === "failed" ||
-        state === "cancelled" ||
-        parsed?.type === "completion" ||
-        parsed?.type === "error"
+        state === "cancelled"
       ) {
         console.log("Final event received. Exiting.");
         ws.close();
@@ -98,15 +114,17 @@ export async function orchestrateMusicVideoWithWebSocket(params: {
  * @param {string} prompt The prompt message
  * @returns {Promise<string>} The user input
  */
-function askUserInput(prompt: string): Promise<string> {
-  return new Promise((resolve) => {
-    process.stdout.write(`\n${prompt}\n> `);
-    process.stdin.resume();
-    process.stdin.once("data", (data) => {
-      process.stdin.pause();
-      resolve(data.toString().trim());
-    });
-  });
+function askUserInput(step: string): string {
+  if (step === "song") {
+    return "Verse must be shorter and more catchy, like a hymn.";
+  } else if (step === "script") {
+    return "The script must be more engaging, with more action and drama.";
+  } else if (step === "images") {
+    return "The images must be more detailed and realistic.";
+  } else if (step === "video") {
+    return "The video must be more engaging, with more action and drama.";
+  }
+  return "";
 }
 
 // Run the script if called directly
