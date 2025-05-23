@@ -169,7 +169,7 @@ export class TaskQueue {
       }
 
       this.queue.splice(index, 1);
-      Logger.info(`Task ${taskId} cancelled successfully`);
+      Logger.info(`Task ${taskId} canceled successfully`);
       return true;
     } catch (error) {
       Logger.error(

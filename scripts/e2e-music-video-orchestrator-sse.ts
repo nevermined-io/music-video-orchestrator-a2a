@@ -118,12 +118,12 @@ function processSSEEvent(rawEvent: string) {
     try {
       const parsed = JSON.parse(data);
       console.log(`[SSE][${eventType}]`, parsed);
-      // Exit if the task is completed, failed, or cancelled
+      // Exit if the task is completed, failed, or canceled
       const state = parsed?.result?.status?.state;
       if (
         state === "completed" ||
         state === "failed" ||
-        state === "cancelled" ||
+        state === "canceled" ||
         eventType === "completion" ||
         eventType === "error"
       ) {

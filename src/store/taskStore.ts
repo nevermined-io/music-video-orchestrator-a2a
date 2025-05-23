@@ -105,8 +105,10 @@ export class TaskStore {
   /**
    * @method updateTask
    * @description Update an existing task
+   * @param {Task} task - The task to update
+   * @param {boolean} [notify] - Whether to notify status listeners (optional)
    */
-  public async updateTask(task: Task): Promise<Task> {
+  public async updateTask(task: Task, notify?: boolean): Promise<Task> {
     try {
       if (!task?.id) {
         throw new Error("Invalid task: missing task ID");
@@ -118,7 +120,9 @@ export class TaskStore {
 
       this.tasks.set(task.id, task);
       Logger.info(`Updated task ${task.id}`);
-      await this.notifyStatusListeners(task);
+      if (notify) {
+        await this.notifyStatusListeners(task);
+      }
       return task;
     } catch (error) {
       Logger.error(

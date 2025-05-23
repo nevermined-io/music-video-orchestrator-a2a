@@ -3,7 +3,14 @@
  * @description Processes tasks and manages their lifecycle for the music video orchestrator
  */
 
-import { Task, TaskState } from "../models/task";
+import {
+  Artifact,
+  Message,
+  Part,
+  Task,
+  TaskState,
+  TaskStatus,
+} from "../models/task";
 import { TaskStore } from "../store/taskStore";
 import { startOrchestration } from "../orchestrator";
 import { Logger } from "../utils/logger";
@@ -11,6 +18,7 @@ import {
   OrchestrationIO,
   OrchestrationProgress,
 } from "../interfaces/orchestrationIO";
+import { v4 as uuidv4 } from "uuid";
 
 /**
  * @class TaskProcessorOrchestrationIO
@@ -31,7 +39,12 @@ class TaskProcessorOrchestrationIO implements OrchestrationIO {
     await this.updateTaskStatus(
       this.task,
       progress.state,
-      { role: "agent", parts: [{ type: "text", text: progress.text }] },
+      {
+        role: "agent",
+        parts: [{ kind: "text", text: progress.text }],
+        messageId: uuidv4(),
+        kind: "message",
+      },
       progress.artifacts
     );
   }
@@ -75,13 +88,15 @@ export class TaskProcessor {
         role: "agent",
         parts: [
           {
-            type: "text",
+            kind: "text",
             text:
               error instanceof Error
                 ? error.message
                 : "Unknown error occurred during processing",
           },
         ],
+        messageId: uuidv4(),
+        kind: "message",
       });
       throw error;
     }
@@ -92,12 +107,12 @@ export class TaskProcessor {
    * @description Validate task data before processing
    */
   private validateTask(task: Task): void {
-    if (!task?.message?.parts) {
+    if (!task?.history?.[0]?.parts) {
       throw new Error("Task message is empty or invalid");
     }
-    const textParts = task.message.parts.filter(
-      (part: any) =>
-        part.type === "text" &&
+    const textParts = task.history?.[0]?.parts?.filter(
+      (part: Part) =>
+        part.kind === "text" &&
         typeof part.text === "string" &&
         part.text.trim().length > 0
     );
@@ -113,22 +128,31 @@ export class TaskProcessor {
   private async updateTaskStatus(
     task: Task,
     state: TaskState,
-    message?: any,
-    artifacts?: any[]
+    message?: Message,
+    artifacts?: Artifact[]
   ): Promise<void> {
     const currentTask = await this.taskStore.getTask(task.id);
     if (!currentTask) throw new Error(`Task ${task.id} not found`);
-    const statusUpdate = {
+    const statusUpdate: TaskStatus = {
       state,
       timestamp: new Date().toISOString(),
       message,
     };
-    const updatedTask = {
+    const updatedTask: Task = {
       ...currentTask,
       status: statusUpdate,
-      artifacts: artifacts || currentTask.artifacts,
-      history: [...(currentTask.history || []), statusUpdate],
+      artifacts: [...(currentTask.artifacts || []), ...(artifacts || [])],
+      history: statusUpdate.message
+        ? [...(currentTask.history || []), statusUpdate.message]
+        : [...(currentTask.history || [])],
+      metadata: {
+        ...currentTask.metadata,
+        statusHistory: [
+          ...(currentTask.metadata?.statusHistory || []),
+          statusUpdate,
+        ],
+      },
     };
-    await this.taskStore.updateTask(updatedTask);
+    await this.taskStore.updateTask(updatedTask, true);
   }
 }

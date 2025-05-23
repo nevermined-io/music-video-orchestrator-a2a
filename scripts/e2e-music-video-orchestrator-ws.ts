@@ -17,15 +17,15 @@ const CONFIG = {
  * Orchestrates a music video using WebSocket for bidirectional communication
  * @param {Object} params Orchestration parameters
  * @param {string} params.prompt The creative prompt for the music video
- * @param {string} [params.sessionId] Optional session ID
+ * @param {string} [params.contextId] Optional session ID
  * @returns {Promise<void>}
  */
 export async function orchestrateMusicVideoWithWebSocket(params: {
   prompt: string;
-  sessionId?: string;
+  contextId?: string;
 }): Promise<void> {
-  const sessionId = params.sessionId || uuidv4();
-  const ws = new WebSocket(`${CONFIG.wsUrl}?sessionId=${sessionId}`);
+  const contextId = params.contextId || uuidv4();
+  const ws = new WebSocket(`${CONFIG.wsUrl}?contextId=${contextId}`);
 
   let lastTaskId: string | undefined;
 
@@ -36,10 +36,12 @@ export async function orchestrateMusicVideoWithWebSocket(params: {
       id: uuidv4(),
       method: "tasks/send",
       params: {
-        sessionId,
+        contextId,
         message: {
           role: "user",
-          parts: [{ type: "text", text: params.prompt }],
+          parts: [{ kind: "text", text: params.prompt }],
+          messageId: uuidv4(),
+          kind: "message",
         },
       },
     };
@@ -64,7 +66,7 @@ export async function orchestrateMusicVideoWithWebSocket(params: {
 
       if (state === "input-required") {
         // Generate feedback based on the currentStep
-        let userInput = "ok";
+        let userInput;
         switch (currentStep) {
           case "generate_song":
             userInput = "Lyrics must be more catchy and engaging."; // Accept the song
@@ -93,11 +95,13 @@ export async function orchestrateMusicVideoWithWebSocket(params: {
           id: uuidv4(),
           method: "tasks/send",
           params: {
-            sessionId,
+            contextId,
             message: {
               role: "user",
-              parts: [{ type: "text", text: userInput }],
+              parts: [{ kind: "text", text: userInput }],
               ...(lastTaskId ? { taskId: lastTaskId } : {}),
+              messageId: uuidv4(),
+              kind: "message",
             },
           },
         };
@@ -108,7 +112,8 @@ export async function orchestrateMusicVideoWithWebSocket(params: {
       if (
         state === "completed" ||
         state === "failed" ||
-        state === "cancelled"
+        state === "canceled" ||
+        state === "rejected"
       ) {
         console.log("Final event received. Exiting.");
         ws.close();

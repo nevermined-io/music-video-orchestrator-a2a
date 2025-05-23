@@ -7,7 +7,7 @@ import {
   OrchestrationIO,
   OrchestrationProgress,
 } from "../interfaces/orchestrationIO";
-import { TaskState } from "../models/task";
+import { Task, TaskState, TaskStatus } from "../models/task";
 import { taskStore } from "../tasks/taskContext";
 import { v4 as uuidv4 } from "uuid";
 
@@ -47,7 +47,7 @@ export class WebSocketOrchestrationIO implements OrchestrationIO {
   async onProgress(progress: OrchestrationProgress): Promise<void> {
     const task = await taskStore.getTask(this.taskId);
     if (!task) return;
-    const statusUpdate = {
+    const statusUpdate: TaskStatus = {
       state: progress.state,
       timestamp: new Date().toISOString(),
       message: progress.text
@@ -55,24 +55,28 @@ export class WebSocketOrchestrationIO implements OrchestrationIO {
             role: "agent",
             parts: [
               {
-                type: "text",
+                kind: "text",
                 text: progress.text,
               },
             ],
             messageId: uuidv4(),
+            kind: "message",
           }
         : undefined,
     };
-    const updatedTask = {
+    const updatedTask: Task = {
       ...task,
       status: statusUpdate,
       artifacts: progress.artifacts || task.artifacts,
-      history: [...(task.history || []), statusUpdate],
+      history: statusUpdate.message
+        ? [...(task.history || []), statusUpdate.message]
+        : [...(task.history || [])],
       metadata: {
         ...task.metadata,
         ...progress.metadata,
+        statusHistory: [...(task.metadata?.statusHistory || []), statusUpdate],
       },
     };
-    await taskStore.updateTask(updatedTask);
+    await taskStore.updateTask(updatedTask, true);
   }
 }

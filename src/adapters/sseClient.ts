@@ -42,7 +42,7 @@ export function subscribeToTaskUpdates(
           if (notification.data?.status?.state) {
             // Check for completion or error states
             if (
-              ["completed", "failed", "cancelled"].includes(
+              ["completed", "failed", "canceled"].includes(
                 notification.data.status.state
               )
             ) {

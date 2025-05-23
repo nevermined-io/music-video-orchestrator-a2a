@@ -4,7 +4,7 @@
  */
 
 import { Request, Response } from "express";
-import { Task, TaskState } from "../models/task";
+import { Task, TaskState, TaskStatus } from "../models/task";
 import { taskStore, taskProcessor, taskQueue } from "../tasks/taskContext";
 import { ErrorHandler } from "../utils/errorHandler";
 import {
@@ -32,7 +32,7 @@ export class A2AController {
       // Notify SSE and webhooks
       const isFinal = [
         TaskState.COMPLETED,
-        TaskState.CANCELLED,
+        TaskState.CANCELED,
         TaskState.FAILED,
       ].includes(task.status.state);
       if (isFinal) {
@@ -204,7 +204,7 @@ export class A2AController {
         });
         return;
       }
-      const { message, sessionId, metadata } = params;
+      const { message, contextId, metadata } = params;
       if (
         !message ||
         !message.parts ||
@@ -221,17 +221,19 @@ export class A2AController {
         });
         return;
       }
-      const initialStatus = {
+      const initialStatus: TaskStatus = {
         state: TaskState.SUBMITTED,
         timestamp: new Date().toISOString(),
       };
       const task: Task = {
         id: uuidv4(),
-        sessionId,
+        contextId,
         status: initialStatus,
-        message,
-        metadata,
-        history: [initialStatus],
+        metadata: {
+          ...metadata,
+          statusHistory: [initialStatus],
+        },
+        history: [message],
       };
       await this.taskStore.createTask(task);
       // Always use the default IO (TaskProcessorOrchestrationIO) for A2A tasks.
@@ -262,7 +264,7 @@ export class A2AController {
         });
         return;
       }
-      const { message, sessionId, metadata, notification } = params;
+      const { message, contextId, metadata, notification } = params;
       if (
         !message ||
         !message.parts ||
@@ -279,17 +281,19 @@ export class A2AController {
         });
         return;
       }
-      const initialStatus = {
+      const initialStatus: TaskStatus = {
         state: TaskState.SUBMITTED,
         timestamp: new Date().toISOString(),
       };
       const task: Task = {
         id: uuidv4(),
-        sessionId,
+        contextId,
         status: initialStatus,
-        message,
-        metadata,
-        history: [initialStatus],
+        metadata: {
+          ...metadata,
+          statusHistory: [initialStatus],
+        },
+        history: [message],
       };
       await this.taskStore.createTask(task);
       // Notification mode: webhook or SSE

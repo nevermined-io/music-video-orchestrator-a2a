@@ -23,6 +23,7 @@ import fs from "fs";
 import { Task, TaskState } from "./models/task";
 import { OrchestrationIO } from "./interfaces/orchestrationIO";
 import { interpretUserFeedbackWithLLM } from "./llm/prompts";
+import { taskStore } from "./tasks/taskContext";
 
 /**
  * @enum OrchestrationStep
@@ -43,24 +44,26 @@ export enum OrchestrationStep {
  * @description Main entry point for reentrant orchestration. Calls the appropriate step based on metadata.currentStep.
  * @param {Task} task - The orchestration task.
  * @param {OrchestrationIO} io - The IO interface for progress and user input.
+ * @param {any} [overrideInput] - Optional synthesized input for step repetition.
  */
 export async function continueOrchestration(
   task: Task,
-  io: OrchestrationIO
+  io: OrchestrationIO,
+  overrideInput?: any
 ): Promise<void> {
   const step = task.metadata?.currentStep;
   switch (step) {
     case OrchestrationStep.GENERATE_SONG:
-      await stepGenerateSong(task, io);
+      await stepGenerateSong(task, io, overrideInput);
       break;
     case OrchestrationStep.GENERATE_SCRIPT_AND_EXTRACT_ENTITIES:
-      await stepGenerateScriptAndExtractEntities(task, io);
+      await stepGenerateScriptAndExtractEntities(task, io, overrideInput);
       break;
       // case OrchestrationStep.GENERATE_IMAGES:
-      //   await stepGenerateImages(task, io);
+      //   await stepGenerateImages(task, io, overrideInput);
       //   break;
       // case OrchestrationStep.GENERATE_VIDEO_CLIPS:
-      //   await stepGenerateVideoClips(task, io);
+      //   await stepGenerateVideoClips(task, io, overrideInput);
       //   break;
       // case OrchestrationStep.COMPILE_AND_UPLOAD_VIDEO:
       //   await stepCompileAndUploadVideo(task, io);
@@ -81,25 +84,33 @@ export async function continueOrchestration(
  * @description Generates the song and requests user feedback (pauses here until user input is received).
  * @param {Task} task - The orchestration task.
  * @param {OrchestrationIO} io - The IO interface for progress and user input.
+ * @param {any} [overrideInput] - Optional synthesized input for step repetition.
  */
 export async function stepGenerateSong(
   task: Task,
-  io: OrchestrationIO
+  io: OrchestrationIO,
+  overrideInput?: any
 ): Promise<void> {
+  // Use the synthesized input if provided, otherwise use the last real user message
+  const input =
+    overrideInput ||
+    (task.history && task.history.length > 0
+      ? task.history[task.history.length - 1]
+      : null);
+  if (!input) {
+    throw new Error("No user input available for song generation.");
+  }
+
   const songAgentCard = await fetchAgentCard("http://localhost:8001");
   await io.onProgress({
     state: TaskState.WORKING,
     text: "Generating song...",
     artifacts: [],
-    metadata: {
-      ...task.metadata,
-      currentStep: OrchestrationStep.GENERATE_SONG,
-    },
   });
 
   const { songResult, songUrl, title } = await generateSong(
     songAgentCard,
-    task.message
+    input
   );
 
   Logger.info(
@@ -119,10 +130,12 @@ export async function stepGenerateSong(
  * @description Generates the script and extracts characters, settings, and scenes.
  * @param {Task} task - The orchestration task.
  * @param {OrchestrationIO} io - The IO interface for progress and user input.
+ * @param {any} [overrideInput] - Optional synthesized input for step repetition.
  */
 export async function stepGenerateScriptAndExtractEntities(
   task: Task,
-  io: OrchestrationIO
+  io: OrchestrationIO,
+  overrideInput?: any
 ): Promise<void> {
   const scriptAgentCard = await fetchAgentCard("http://localhost:8002");
 
@@ -132,10 +145,13 @@ export async function stepGenerateScriptAndExtractEntities(
     artifacts: [],
   });
 
+  // Use overrideInput if provided, otherwise use the conversation history
+  const scriptInput = overrideInput || task.history;
+
   // Generate the script using the accepted song
   const scriptResult = await generateScript(
     scriptAgentCard,
-    task.message,
+    scriptInput,
     task.artifacts?.[0] // Use the accepted song
   );
 
@@ -161,7 +177,7 @@ export async function stepGenerateScriptAndExtractEntities(
     ...task.metadata,
     currentStep: OrchestrationStep.GENERATE_IMAGES,
   };
-  task.artifacts = scriptArtifacts;
+  task.artifacts = [...(task.artifacts || []), ...scriptArtifacts];
 
   await io.onProgress({
     state: TaskState.INPUT_REQUIRED,
@@ -172,26 +188,18 @@ export async function stepGenerateScriptAndExtractEntities(
       currentStep: OrchestrationStep.GENERATE_IMAGES,
     },
   });
-
-  // Aquí puedes llamar directamente al siguiente paso si no hay espera de usuario:
-  // await stepGenerateImages(task, io);
 }
 
 /**
- * @function handleUserInput
+ * @function handleUserFeedback
  * @description Handles user feedback after an INPUT_REQUIRED state, deciding whether to advance or repeat the current step using LLM interpretation.
  * @param {Task} task - The orchestration task.
- * @param {string} userInput - The user's feedback or instructions.
  * @param {OrchestrationIO} io - The IO interface for progress and user input.
  */
-export async function handleUserInput(
+export async function handleUserFeedback(
   task: Task,
-  userInput: string,
   io: OrchestrationIO
 ): Promise<void> {
-  // Use LLM to interpret user feedback and decide next action
-  const userPromptMessage = task.status?.message?.parts?.[0]?.text || "";
-
   // Select the correct agentCard based on the current step
   let agentCard: any = {};
   switch (task.metadata?.currentStep) {
@@ -209,36 +217,70 @@ export async function handleUserInput(
       agentCard = {};
   }
 
+  // Use the full history and artifacts for LLM feedback interpretation
+  const userMessages = (task.history || []).filter(
+    (msg) => msg.role === "user"
+  );
+  const userComment =
+    userMessages.length > 0 ? userMessages[userMessages.length - 1] : null;
+  if (!userComment) {
+    throw new Error(
+      "No user message found in history for LLM feedback interpretation."
+    );
+  }
   const feedback = await interpretUserFeedbackWithLLM({
-    previousInput: task.message,
-    previousOutput: task.artifacts,
-    userPromptMessage,
-    userComment: userInput,
+    history: task.history || [],
+    previousOutput: task.artifacts || [],
+    userComment,
     agentCard,
   });
 
   switch (task.metadata?.currentStep) {
     case OrchestrationStep.GENERATE_SONG:
       if (feedback.action === "accept") {
-        // Advance to next step
         task.metadata.currentStep =
           OrchestrationStep.GENERATE_SCRIPT_AND_EXTRACT_ENTITIES;
+        await continueOrchestration(task, io);
       } else if (feedback.action === "retry" || feedback.action === "modify") {
-        // Repeat the same step, update input if provided
-        if (feedback.newInput) {
-          task.message = feedback.newInput;
-        }
-        // currentStep remains the same
+        await continueOrchestration(task, io, feedback.newInput);
       }
       break;
-    // Add similar logic for other steps if needed
+    case OrchestrationStep.GENERATE_SCRIPT_AND_EXTRACT_ENTITIES:
+      if (feedback.action === "accept") {
+        task.metadata.currentStep = OrchestrationStep.GENERATE_IMAGES;
+        await continueOrchestration(task, io);
+      } else if (feedback.action === "retry" || feedback.action === "modify") {
+        await continueOrchestration(task, io, feedback.newInput);
+      }
+      break;
+    case OrchestrationStep.GENERATE_IMAGES:
+      if (feedback.action === "accept") {
+        task.metadata.currentStep = OrchestrationStep.GENERATE_VIDEO_CLIPS;
+        await continueOrchestration(task, io);
+      } else if (feedback.action === "retry" || feedback.action === "modify") {
+        await continueOrchestration(task, io, feedback.newInput);
+      }
+      break;
+    case OrchestrationStep.GENERATE_VIDEO_CLIPS:
+      if (feedback.action === "accept") {
+        task.metadata.currentStep = OrchestrationStep.COMPILE_AND_UPLOAD_VIDEO;
+        await continueOrchestration(task, io);
+      } else if (feedback.action === "retry" || feedback.action === "modify") {
+        await continueOrchestration(task, io, feedback.newInput);
+      }
+      break;
+    case OrchestrationStep.COMPILE_AND_UPLOAD_VIDEO:
+      if (feedback.action === "accept") {
+        task.metadata.currentStep = OrchestrationStep.COMPLETED;
+        await continueOrchestration(task, io);
+      } else if (feedback.action === "retry" || feedback.action === "modify") {
+        await continueOrchestration(task, io, feedback.newInput);
+      }
+      break;
     default:
-      // By default, advance to next step
+      await continueOrchestration(task, io);
       break;
   }
-
-  // Continue orchestration (onProgress will persist the task)
-  await continueOrchestration(task, io);
 }
 
 /**
@@ -255,16 +297,12 @@ export async function startOrchestration(
   Logger.info(
     "[startOrchestration] Starting music video orchestration process"
   );
-  await continueOrchestration(
-    {
-      ...task,
-      metadata: {
-        ...task.metadata,
-        currentStep: OrchestrationStep.GENERATE_SONG,
-      },
-    },
-    io
-  );
+  task.metadata = {
+    ...task.metadata,
+    currentStep: OrchestrationStep.GENERATE_SONG,
+  };
+  await taskStore.updateTask(task);
+  await continueOrchestration(task, io);
 }
 
 /**
@@ -274,7 +312,7 @@ export async function startOrchestration(
  * @returns {Promise<any>} - The result of the workflow.
  */
 export async function startOrchestration_old(
-  input: { prompt: string; style?: string; sessionId?: string },
+  input: { prompt: string; style?: string; contextId?: string },
   io: OrchestrationIO
 ): Promise<any> {
   Logger.info(

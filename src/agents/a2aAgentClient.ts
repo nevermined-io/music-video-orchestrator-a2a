@@ -278,8 +278,10 @@ export async function sendTask(
       throw new Error(
         `[sendTask] Task failed: ${statusResponse.data.status.error}`
       );
-    } else if (status === "cancelled") {
-      throw new Error("[sendTask] Task was cancelled");
+    } else if (status === "canceled") {
+      throw new Error("[sendTask] Task was canceled");
+    } else if (status === "rejected") {
+      throw new Error("[sendTask] Task was rejected");
     }
     await new Promise((resolve) => setTimeout(resolve, pollingInterval));
     retries++;

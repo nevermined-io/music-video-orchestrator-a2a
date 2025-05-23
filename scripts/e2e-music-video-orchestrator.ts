@@ -134,8 +134,10 @@ async function pollTaskStatus(taskId: string): Promise<any> {
       return response.data;
     } else if (status === "failed") {
       throw new Error(`Task failed: ${response.data.status.error}`);
-    } else if (status === "cancelled") {
-      throw new Error("Task was cancelled");
+    } else if (status === "canceled") {
+      throw new Error("Task was canceled");
+    } else if (status === "rejected") {
+      throw new Error("Task was rejected");
     }
     await new Promise((resolve) => setTimeout(resolve, CONFIG.pollingInterval));
     retries++;

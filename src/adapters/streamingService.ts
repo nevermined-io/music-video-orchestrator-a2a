@@ -70,7 +70,7 @@ export class StreamingService {
     if (!connections) return;
     const isFinal = [
       TaskState.COMPLETED,
-      TaskState.CANCELLED,
+      TaskState.CANCELED,
       TaskState.FAILED,
     ].includes(task.status.state);
     const event = {

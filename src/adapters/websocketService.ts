@@ -5,23 +5,23 @@
 
 import WebSocket from "ws";
 import { SessionManager } from "../store/sessionConnectionStore";
-import { resolveUserInput } from "../store/userInputWaitStore";
 import { v4 as uuidv4 } from "uuid";
 import { taskStore, taskQueue } from "../tasks/taskContext";
-import { Task, TaskState } from "../models/task";
+import { Message, Task, TaskState } from "../models/task";
 import { WebSocketOrchestrationIO } from "./webSocketOrchestrationIO";
+import { handleUserFeedback } from "../orchestrator";
 
 const wss = new WebSocket.Server({ noServer: true });
 const sessionManager = new SessionManager();
 
 wss.on("connection", (ws: WebSocket, req) => {
-  // Extract sessionId from query params (optional for new tasks)
+  // Extract contextId from query params (optional for new tasks)
   const url = new URL(req.url || "", `http://${req.headers.host}`);
-  let sessionId = url.searchParams.get("sessionId");
+  let contextId = url.searchParams.get("contextId");
 
-  // Store the WebSocket in the session if sessionId is present
-  if (sessionId) {
-    sessionManager.updateSession(sessionId, { ws });
+  // Store the WebSocket in the session if contextId is present
+  if (contextId) {
+    sessionManager.updateSession(contextId, { ws });
   }
 
   /**
@@ -63,25 +63,24 @@ wss.on("connection", (ws: WebSocket, req) => {
     // Only handle 'tasks/send'
     if (parsed.method === "tasks/send") {
       const { params } = parsed;
-      const messageObj = params?.message;
-      const sessionIdParam = params?.sessionId || messageObj?.contextId;
+      const messageObj: Message = params?.message;
+      const contextIdParam = params?.contextId || messageObj?.contextId;
       const taskId = messageObj?.taskId;
-      const inputText = messageObj?.parts?.[0]?.text;
 
       // CASE 1: New task (no taskId)
       if (!taskId) {
-        // Use provided sessionId for grouping, or generate a new one if not provided
-        let effectiveSessionId = sessionIdParam;
-        if (!effectiveSessionId) {
-          // No sessionId provided: create a new session
-          effectiveSessionId = uuidv4();
-          sessionManager.createSession(effectiveSessionId, { ws });
+        // Use provided contextId for grouping, or generate a new one if not provided
+        let effectiveContextId = contextIdParam;
+        if (!effectiveContextId) {
+          // No contextId provided: create a new session
+          effectiveContextId = uuidv4();
+          sessionManager.createSession(effectiveContextId, { ws });
         } else {
-          // sessionId provided: create session if it doesn't exist, otherwise update
-          if (!sessionManager.getSession(effectiveSessionId)) {
-            sessionManager.createSession(effectiveSessionId, { ws });
+          // contextId provided: create session if it doesn't exist, otherwise update
+          if (!sessionManager.getSession(effectiveContextId)) {
+            sessionManager.createSession(effectiveContextId, { ws });
           } else {
-            sessionManager.updateSession(effectiveSessionId, { ws });
+            sessionManager.updateSession(effectiveContextId, { ws });
           }
         }
         const newTaskId = uuidv4();
@@ -110,34 +109,67 @@ wss.on("connection", (ws: WebSocket, req) => {
         };
         const task: Task = {
           id: newTaskId,
-          sessionId: effectiveSessionId,
+          contextId: effectiveContextId,
           status: initialStatus,
-          message: messageObj,
-          metadata: params?.metadata,
-          history: [initialStatus],
+          metadata: {
+            ...(params?.metadata || {}),
+            statusHistory: [initialStatus],
+          },
+          history: [messageObj],
         };
 
         // Now create the task
         await taskStore.createTask(task);
         // Enqueue the task in the taskQueue with the custom WebSocketOrchestrationIO
-        // This ensures concurrency, retries, and unified processing for all tasks
         const io = new WebSocketOrchestrationIO(newTaskId);
         await taskQueue.enqueueTask(task, io);
 
         return;
       }
 
-      // CASE 2: Input for existing task (must have both taskId and sessionId/contextId)
-      if (taskId && sessionIdParam && inputText) {
-        // Resolve the pending user input for this session/task
-        resolveUserInput(sessionIdParam, inputText);
-        ws.send(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            id: parsed.id,
-            result: { status: "input received" },
-          })
-        );
+      // CASE 2: Input for existing task (must have both taskId and contextId/contextId)
+      if (taskId && contextIdParam) {
+        // Load the existing task
+        const task = await taskStore.getTask(taskId);
+        if (!task) {
+          ws.send(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: parsed.id,
+              error: { code: -32000, message: "Task not found" },
+            })
+          );
+          return;
+        }
+
+        // Create the IO for this task (WebSocketOrchestrationIO)
+        const io = new WebSocketOrchestrationIO(taskId);
+
+        // Process the user input and continue orchestration
+        try {
+          task.history = [...(task.history || []), messageObj];
+          await taskStore.updateTask(task);
+          await handleUserFeedback(task, io);
+          ws.send(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: parsed.id,
+              result: { status: "input processed" },
+            })
+          );
+        } catch (err) {
+          ws.send(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: parsed.id,
+              error: {
+                code: -32001,
+                message: "Failed to process input",
+                details: err?.message,
+              },
+            })
+          );
+        }
         return;
       }
 
@@ -163,8 +195,8 @@ wss.on("connection", (ws: WebSocket, req) => {
   });
 
   ws.on("close", () => {
-    if (sessionId) {
-      sessionManager.updateSession(sessionId, { ws: undefined });
+    if (contextId) {
+      sessionManager.updateSession(contextId, { ws: undefined });
     }
   });
 });
